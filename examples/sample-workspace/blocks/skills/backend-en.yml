@@ -1,0 +1,7 @@
+id: backend-en
+blockType: skill
+language: en
+section: skill
+label: Backend
+value: Node.js, APIs, integrations, relational modeling, and SQL querying
+items: []

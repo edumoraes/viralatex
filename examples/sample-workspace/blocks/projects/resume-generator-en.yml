@@ -1,0 +1,8 @@
+id: resume-generator-en
+blockType: project
+language: en
+section: project
+title: Bilingual LaTeX Resume Generator
+dateRange: 2026
+content: Designed and implemented a reusable LaTeX base with language variants, shared sections, Docker build automation, and structural checks.
+items: []

@@ -1,0 +1,10 @@
+id: base-pt
+title: Currículo Base PT
+language: pt
+roleKey: pt
+blockIds:
+  - summary-pt
+  - trocados-dev-pt
+  - resume-generator-pt
+  - backend-pt
+  - ufam-pt
