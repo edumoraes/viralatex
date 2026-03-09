@@ -43,6 +43,7 @@ make image
 Gerar todas as versoes:
 
 ```bash
+make build
 make build-all
 ```
 
@@ -90,6 +91,8 @@ Para compilar um arquivo especifico:
 ```bash
 make build FILE=src/versions/pt/base.tex
 ```
+
+Sem `FILE`, `make build` compila todas as variantes.
 
 ## Testes
 

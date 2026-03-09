@@ -9,14 +9,17 @@ image:
 	docker build -t $(IMAGE_NAME) .
 
 build:
-	test -n "$(FILE)"
 	mkdir -p out
+ifeq ($(strip $(FILE)),)
+	$(MAKE) build-all
+else
 	docker run --rm \
 		-v "$(CURDIR):/workspace" \
 		-w /workspace \
 		-e TEXINPUTS="$(TEXINPUTS_VALUE)" \
 		$(IMAGE_NAME) \
 		$(LATEXMK) -lualatex -interaction=nonstopmode -halt-on-error -output-directory=out $(FILE)
+endif
 
 build-pt:
 	mkdir -p out
