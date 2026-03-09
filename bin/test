@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+fail() {
+  printf 'FAIL: %s\n' "$1" >&2
+  exit 1
+}
+
+pass() {
+  printf 'PASS: %s\n' "$1"
+}
+
+assert_file() {
+  local path="$1"
+  [[ -f "$path" ]] || fail "missing file: $path"
+}
+
+assert_dir() {
+  local path="$1"
+  [[ -d "$path" ]] || fail "missing directory: $path"
+}
+
+assert_grep() {
+  local pattern="$1"
+  local path="$2"
+  grep -Fq "$pattern" "$path" || fail "expected '$pattern' in $path"
+}
+
+assert_glob_count() {
+  local expected_min="$1"
+  local glob_pattern="$2"
+  shopt -s nullglob
+  local matches=( $glob_pattern )
+  shopt -u nullglob
+  (( ${#matches[@]} >= expected_min )) || fail "expected at least $expected_min matches for $glob_pattern"
+}
+
+printf 'Running repository checks in %s\n' "$ROOT_DIR"
+
+assert_file "Dockerfile"
+assert_file "Makefile"
+assert_file "README.md"
+assert_file "src/template/resume.cls"
+assert_file "src/shared/profile.tex"
+assert_dir "src/shared/sections/pt"
+assert_dir "src/shared/sections/en"
+assert_dir "src/versions/pt"
+assert_dir "src/versions/en"
+pass "required project files exist"
+
+assert_glob_count 2 "src/versions/pt/*.tex"
+assert_glob_count 2 "src/versions/en/*.tex"
+pass "expected resume variants exist"
+
+for path in src/versions/pt/*.tex src/versions/en/*.tex; do
+  assert_grep "\\documentclass{resume}" "$path"
+  assert_grep "\\input{profile.tex}" "$path"
+done
+pass "all variants use the shared template and profile"
+
+assert_grep "docker build -t \$(IMAGE_NAME) ." "Makefile"
+assert_grep "bin/test" "Makefile"
+assert_grep 'TEXINPUTS=' "Makefile"
+assert_grep "make build-all" "README.md"
+assert_grep "make test" "README.md"
+pass "build and test entrypoints are documented"
+
+make -n build-all >/dev/null
+make -n build-pt >/dev/null
+make -n build-en >/dev/null
+pass "build targets expand successfully"
+
+if [[ "${RUN_DOCKER_SMOKE_TEST:-0}" == "1" ]]; then
+  command -v docker >/dev/null 2>&1 || fail "docker not found for smoke test"
+  docker image inspect "${IMAGE_NAME:-curriculo-latex}" >/dev/null 2>&1 || fail "docker image '${IMAGE_NAME:-curriculo-latex}' not found; run 'make image' first"
+  make build-all
+  pass "docker smoke build completed"
+else
+  printf 'SKIP: docker smoke build disabled (set RUN_DOCKER_SMOKE_TEST=1 after make image)\n'
+fi
+
+printf 'All automated checks passed.\n'
