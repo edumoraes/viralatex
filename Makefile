@@ -1,5 +1,6 @@
 IMAGE_NAME ?= curriculo-latex
 LATEXMK ?= latexmk
+LATEXMK_ENGINE ?= -pdf
 FILE ?=
 TEXINPUTS_VALUE = /workspace/src/template//:/workspace/src/shared//:/workspace/src/shared/sections//:
 
@@ -18,7 +19,7 @@ else
 		-w /workspace \
 		-e TEXINPUTS="$(TEXINPUTS_VALUE)" \
 		$(IMAGE_NAME) \
-		$(LATEXMK) -lualatex -interaction=nonstopmode -halt-on-error -output-directory=out $(FILE)
+		$(LATEXMK) $(LATEXMK_ENGINE) -interaction=nonstopmode -halt-on-error -output-directory=out $(FILE)
 endif
 
 build-pt:
@@ -28,7 +29,7 @@ build-pt:
 		-w /workspace \
 		-e TEXINPUTS="$(TEXINPUTS_VALUE)" \
 		$(IMAGE_NAME) \
-		sh -lc '$(LATEXMK) -lualatex -interaction=nonstopmode -halt-on-error -output-directory=out src/versions/pt/*.tex'
+		sh -lc '$(LATEXMK) $(LATEXMK_ENGINE) -interaction=nonstopmode -halt-on-error -output-directory=out src/versions/pt/*.tex'
 
 build-en:
 	mkdir -p out
@@ -37,7 +38,7 @@ build-en:
 		-w /workspace \
 		-e TEXINPUTS="$(TEXINPUTS_VALUE)" \
 		$(IMAGE_NAME) \
-		sh -lc '$(LATEXMK) -lualatex -interaction=nonstopmode -halt-on-error -output-directory=out src/versions/en/*.tex'
+		sh -lc '$(LATEXMK) $(LATEXMK_ENGINE) -interaction=nonstopmode -halt-on-error -output-directory=out src/versions/en/*.tex'
 
 build-all:
 	mkdir -p out
@@ -46,7 +47,7 @@ build-all:
 		-w /workspace \
 		-e TEXINPUTS="$(TEXINPUTS_VALUE)" \
 		$(IMAGE_NAME) \
-		sh -lc '$(LATEXMK) -lualatex -interaction=nonstopmode -halt-on-error -output-directory=out src/versions/pt/*.tex src/versions/en/*.tex'
+		sh -lc '$(LATEXMK) $(LATEXMK_ENGINE) -interaction=nonstopmode -halt-on-error -output-directory=out src/versions/pt/*.tex src/versions/en/*.tex'
 
 test:
 	bin/test
