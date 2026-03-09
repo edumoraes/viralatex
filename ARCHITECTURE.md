@@ -1,14 +1,14 @@
 # Resume Studio Desktop Architecture
 
 ## Summary
-This repository currently implements a local-first desktop bootstrap for resume management and rendering. The architecture combines four active layers:
+This repository currently implements a local-first desktop workspace editor for resume management and rendering. The architecture combines four active layers:
 
 - legacy LaTeX presentation assets in `src/`
 - a React and TypeScript desktop frontend in `desktop/src/`
 - a Rust and Tauri backend in `desktop/src-tauri/src/`
 - a filesystem-backed sample workspace in `examples/sample-workspace/`
 
-The repository is not a web application and does not currently use Rails, Postgres, background jobs, or server-side persistence. The active architecture is a desktop client that reads structured files from disk and renders PDFs locally.
+The repository is not a web application and does not currently use Rails, Postgres, background jobs, or server-side persistence. The active architecture is a desktop client that reads and writes structured files from disk, persists minimal operational state inside the workspace, and renders PDFs locally.
 
 ## Architecture Goals
 - preserve the current PDF quality from the LaTeX layer
@@ -35,11 +35,14 @@ The repository is not a web application and does not currently use Rails, Postgr
 The frontend lives in `desktop/src/` and is built with React, TypeScript, and Vite. It is responsible for:
 
 - collecting a workspace path from the user
-- triggering sample workspace creation
 - opening an existing workspace
-- showing workspace summary data
-- listing blocks and resume definitions
+- optionally seeding a sample workspace
+- showing workspace summary data and manifest version
+- editing profile, blocks, and resume definitions
+- archiving blocks and resumes locally
 - triggering resume rendering and showing the result
+- showing persisted render history
+- calling a task-oriented LLM stub boundary
 
 The frontend does not own persistence. It is a thin orchestration layer over Tauri commands.
 
@@ -49,20 +52,28 @@ The command layer lives primarily in `desktop/src-tauri/src/lib.rs`. It exposes 
 - `create_sample_workspace`
 - `select_workspace`
 - `load_workspace_summary`
-- `list_blocks`
-- `list_resumes`
+- `load_workspace_snapshot`
+- `save_profile`
+- `create_block`
+- `update_block`
+- `archive_block`
+- `create_resume`
+- `update_resume`
+- `archive_resume`
+- `save_app_workspace_state`
 - `render_resume`
-- `get_render_status`
+- `run_llm_task`
 
-This layer also manages in-memory app state such as the selected workspace and recent render history.
+This layer keeps only the selected workspace in memory. Operational state and render history are persisted in the workspace itself.
 
 ### 3. Rust domain and file services
 The Rust backend loads and validates the workspace using modules in `desktop/src-tauri/src/`:
 
-- `workspace.rs`: filesystem validation, loading, and sample workspace creation
+- `workspace.rs`: manifest-based validation, loading, CRUD persistence, archival, and workspace-local operational state
 - `domain.rs`: serializable data structures shared across the app boundary
 - `renderer.rs`: local render orchestration and artifact generation
-- `app_state.rs`: selected workspace and render history
+- `app_state.rs`: selected workspace
+- `llm.rs`: task-oriented local stub for the future LLM boundary
 
 This layer treats YAML files in the workspace as the source of truth.
 
@@ -79,11 +90,13 @@ The desktop renderer does not ask the user to edit these files directly. Instead
 ## Workspace Architecture
 The workspace is a directory tree on disk. The sample implementation in `examples/sample-workspace/` demonstrates the expected shape:
 
+- `workspace.yml`: manifest and schema version entrypoint
+- `.app/`: workspace-local operational state
 - `profile/`: profile identity data in YAML
 - `blocks/`: reusable content blocks grouped by topic
 - `resumes/`: resume definitions describing variants to render
 - `renders/`: output PDFs and logs created by render attempts
-- `.cache/`: local render cache area when needed
+- `blocks/_archived` and `resumes/_archived`: archived entities kept for traceability
 
 The workspace model is intentionally file-based:
 
@@ -95,15 +108,21 @@ The workspace model is intentionally file-based:
 ## Data Flow
 ### Create sample workspace
 1. The frontend sends a path to `create_sample_workspace`.
-2. Rust copies the bundled sample workspace into that location.
-3. Rust sets the selected workspace in app state.
-4. The frontend refreshes summary, blocks, and resumes.
+2. Rust copies the bundled sample workspace, including `workspace.yml` and `.app/`, into that location.
+3. Rust sets the selected workspace in runtime state.
+4. The frontend hydrates from `load_workspace_snapshot`.
 
 ### Open existing workspace
 1. The frontend sends a path to `select_workspace`.
 2. Rust canonicalizes the path and validates the workspace structure.
 3. Rust stores the selected workspace in app state.
-4. The frontend requests summary, blocks, and resumes.
+4. The frontend requests a full workspace snapshot.
+
+### Edit workspace
+1. The frontend edits typed forms for profile, blocks, or resumes.
+2. Rust validates and writes YAML back into the workspace.
+3. Archive actions move files into `_archived` folders instead of deleting them.
+4. The frontend reloads the workspace snapshot.
 
 ### Render resume
 1. The frontend sends a `resumeId` to `render_resume`.
@@ -111,7 +130,8 @@ The workspace model is intentionally file-based:
 3. Rust resolves the target resume definition.
 4. Rust generates temporary render inputs and invokes the local render flow.
 5. Rust writes artifacts into the workspace `renders/` directory.
-6. Rust returns a `RenderResult` with status, output path, log path, and optional error message.
+6. Rust appends the `RenderResult` to `.app/render-history.yml`.
+7. Rust returns a `RenderResult` with status, output path, log path, and optional error message.
 
 ## Rendering Pipeline
 The renderer is implemented in `desktop/src-tauri/src/renderer.rs`.
@@ -134,12 +154,16 @@ Design constraints:
 - the template quality from the legacy LaTeX layer should remain unchanged unless intentionally edited
 
 ## State Model
-The current app state is deliberately small:
+The runtime app state is deliberately small:
 
 - `selected_workspace`: canonical path of the active workspace
-- `render_history`: in-memory map of recent render results by job id
 
-This is sufficient for the current bootstrap. There is no persistent application database yet.
+Workspace-local operational persistence lives on disk:
+
+- `.app/state.yml`: last selected resume and other minimal app state
+- `.app/render-history.yml`: persisted render history by job
+
+There is still no persistent application database.
 
 ## Interface Contracts
 ### Frontend to backend
@@ -155,6 +179,7 @@ These types are defined in Rust and mirrored structurally in the frontend TypeSc
 ### Filesystem to backend
 The backend expects stable workspace conventions:
 
+- `workspace.yml` as the manifest entrypoint
 - valid YAML files
 - known folder layout
 - predictable identifiers for blocks and resumes
@@ -202,10 +227,9 @@ Tradeoff:
 - the renderer must adapt to legacy template constraints
 
 ## Current Limitations
-- no in-app editing of workspace content yet
-- no persistent DB for indexing or history
+- no real provider-backed AI integration yet
+- no persistent DB for indexing or search
 - no cloud sync
-- no AI extraction, rewrite, or targeting workflows
 - no background job system beyond local command execution
 - render success still depends on the local environment and available binaries
 

@@ -1,5 +1,18 @@
 use serde::{Deserialize, Serialize};
 
+pub const WORKSPACE_SCHEMA_VERSION: u32 = 1;
+pub const APP_DIR: &str = ".app";
+pub const ARCHIVED_DIR: &str = "_archived";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceManifest {
+    pub schema_version: u32,
+    pub workspace_id: String,
+    pub workspace_name: String,
+    pub default_template_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
@@ -44,17 +57,19 @@ pub struct ResumeDefinition {
     pub block_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceSummary {
     pub root_path: String,
+    pub workspace_name: String,
     pub profile_name: String,
     pub available_languages: Vec<String>,
     pub block_count: usize,
     pub resume_count: usize,
+    pub render_history_count: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RenderResult {
     pub job_id: String,
@@ -63,4 +78,45 @@ pub struct RenderResult {
     pub output_path: Option<String>,
     pub log_path: Option<String>,
     pub error_message: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AppWorkspaceState {
+    #[serde(default)]
+    pub last_selected_resume_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSnapshot {
+    pub summary: WorkspaceSummary,
+    pub manifest: WorkspaceManifest,
+    pub profile: Profile,
+    pub blocks: Vec<Block>,
+    pub resumes: Vec<ResumeDefinition>,
+    pub render_history: Vec<RenderResult>,
+    pub app_state: AppWorkspaceState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmTaskRequest {
+    pub task_type: String,
+    #[serde(default)]
+    pub input_text: String,
+    pub block_id: Option<String>,
+    pub resume_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmTaskResult {
+    pub task_type: String,
+    pub status: String,
+    pub provider: String,
+    pub output_text: String,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }

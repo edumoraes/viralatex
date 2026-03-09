@@ -5,16 +5,43 @@ This repository now contains two complementary layers:
 - the original LaTeX engine in `src/`, still useful as a reference and template base
 - the bootstrap of the new local-first desktop application in `desktop/`
 
-The immediate goal is to validate the product foundation with `Tauri + Rust + React + TypeScript`, using a filesystem-backed workspace and real local rendering through `tectonic`.
+The immediate goal is to validate the product foundation with `Tauri + Rust + React + TypeScript`, using a manifest-versioned local workspace, form-based local CRUD, workspace-local operational persistence, and real local rendering through `tectonic`.
 
 ## Desktop Bootstrap
 
 The desktop app lives in `desktop/` and assumes:
 
 - `filesystem` as the canonical source of user data
+- a stable workspace contract rooted at `workspace.yml`
+- workspace-local operational state in `.app/`
 - `SQLite` only as a future operational and indexing layer
 - `tectonic` as the local PDF rendering engine
 - a sample workspace in `examples/sample-workspace/`
+
+### Workspace contract
+
+Each workspace now has an explicit root manifest plus entity folders:
+
+```text
+workspace.yml
+.app/
+  state.yml
+  render-history.yml
+profile/
+blocks/
+  _archived/
+resumes/
+  _archived/
+renders/
+```
+
+- `workspace.yml`: stable contract entrypoint with `schemaVersion`, `workspaceId`, `workspaceName`, and `defaultTemplateId`
+- `profile/profile.yml`: singleton profile document
+- `blocks/**/*.yml`: active reusable content blocks
+- `resumes/*.yml`: active resume definitions
+- `blocks/_archived` and `resumes/_archived`: soft-deleted entities
+- `.app/render-history.yml`: persisted render history
+- `.app/state.yml`: minimal workspace-local app state such as last selected resume
 
 ### New structure
 
@@ -86,7 +113,7 @@ Hook behavior:
 - `pre-commit`: file hygiene, YAML/JSON/TOML validation, secret detection, shell checks, frontend lint, Rust formatting, and Rust clippy
 - `pre-push`: `make test`, `npm --prefix desktop run build`, and `cargo test --manifest-path desktop/src-tauri/Cargo.toml`
 
-The app creates or opens a local workspace, lists blocks and resume definitions, and attempts to render a real PDF into the workspace `renders/` directory.
+The app creates or opens a local workspace, edits profile, blocks, and resume definitions through structured forms, persists render history inside the workspace, and renders PDFs into the workspace `renders/` directory.
 
 ## Legacy LaTeX Engine
 

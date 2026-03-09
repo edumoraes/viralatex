@@ -124,6 +124,7 @@ pub fn render_resume(
             output_path: None,
             log_path: Some(log_path.display().to_string()),
             error_message: Some("Tectonic failed to compile the generated resume.".to_string()),
+            created_at: unix_timestamp_string(),
         };
     }
 
@@ -146,6 +147,7 @@ pub fn render_resume(
         output_path: Some(pdf_path.display().to_string()),
         log_path: Some(log_path.display().to_string()),
         error_message: None,
+        created_at: unix_timestamp_string(),
     }
 }
 
@@ -432,6 +434,7 @@ fn failed_result(job_id: String, resume_id: String, error_message: String) -> Re
         output_path: None,
         log_path: None,
         error_message: Some(error_message),
+        created_at: unix_timestamp_string(),
     }
 }
 
@@ -440,6 +443,10 @@ fn unix_millis() -> u128 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or_default()
+}
+
+fn unix_timestamp_string() -> String {
+    unix_millis().to_string()
 }
 
 fn escape_tex(input: &str) -> String {
