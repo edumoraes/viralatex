@@ -3,6 +3,7 @@ LATEXMK ?= latexmk
 LATEXMK_ENGINE ?= -pdf
 FILE ?=
 TEXINPUTS_VALUE = /workspace/src/template//:/workspace/src/shared//:/workspace/src/shared/sections//:
+LATEXMK_FLAGS = $(LATEXMK_ENGINE) -interaction=nonstopmode -halt-on-error -output-directory=out
 
 .PHONY: image build build-all build-pt build-en test clean shell
 
@@ -19,7 +20,7 @@ else
 		-w /workspace \
 		-e TEXINPUTS="$(TEXINPUTS_VALUE)" \
 		$(IMAGE_NAME) \
-		$(LATEXMK) $(LATEXMK_ENGINE) -interaction=nonstopmode -halt-on-error -output-directory=out $(FILE)
+		sh -lc 'file="$(FILE)"; lang="$$(basename "$$(dirname "$$file")")"; name="$$(basename "$$file" .tex)"; $(LATEXMK) $(LATEXMK_FLAGS) -jobname="$$lang-$$name" "$$file"'
 endif
 
 build-pt:
@@ -29,7 +30,7 @@ build-pt:
 		-w /workspace \
 		-e TEXINPUTS="$(TEXINPUTS_VALUE)" \
 		$(IMAGE_NAME) \
-		sh -lc '$(LATEXMK) $(LATEXMK_ENGINE) -interaction=nonstopmode -halt-on-error -output-directory=out src/versions/pt/*.tex'
+		sh -lc 'for file in src/versions/pt/*.tex; do name="$$(basename "$$file" .tex)"; $(LATEXMK) $(LATEXMK_FLAGS) -jobname="pt-$$name" "$$file"; done'
 
 build-en:
 	mkdir -p out
@@ -38,7 +39,7 @@ build-en:
 		-w /workspace \
 		-e TEXINPUTS="$(TEXINPUTS_VALUE)" \
 		$(IMAGE_NAME) \
-		sh -lc '$(LATEXMK) $(LATEXMK_ENGINE) -interaction=nonstopmode -halt-on-error -output-directory=out src/versions/en/*.tex'
+		sh -lc 'for file in src/versions/en/*.tex; do name="$$(basename "$$file" .tex)"; $(LATEXMK) $(LATEXMK_FLAGS) -jobname="en-$$name" "$$file"; done'
 
 build-all:
 	mkdir -p out
@@ -47,7 +48,7 @@ build-all:
 		-w /workspace \
 		-e TEXINPUTS="$(TEXINPUTS_VALUE)" \
 		$(IMAGE_NAME) \
-		sh -lc '$(LATEXMK) $(LATEXMK_ENGINE) -interaction=nonstopmode -halt-on-error -output-directory=out src/versions/pt/*.tex src/versions/en/*.tex'
+		sh -lc 'for file in src/versions/pt/*.tex src/versions/en/*.tex; do lang="$$(basename "$$(dirname "$$file")")"; name="$$(basename "$$file" .tex)"; $(LATEXMK) $(LATEXMK_FLAGS) -jobname="$$lang-$$name" "$$file"; done'
 
 test:
 	bin/test

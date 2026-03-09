@@ -25,7 +25,7 @@ out/
 - `src/shared/profile.tex`: identidade, contatos e links reutilizaveis.
 - `src/shared/sections/<idioma>/`: secoes reutilizaveis por idioma.
 - `src/versions/<idioma>/`: pontos de entrada compilaveis para cada variante.
-- `out/`: PDFs e artefatos de build.
+- `out/`: PDFs e artefatos de build. Os arquivos compilados recebem prefixo do idioma, por exemplo `pt-base.pdf` e `en-base.pdf`.
 
 ## Requisitos
 
@@ -46,6 +46,8 @@ Gerar todas as versoes:
 make build
 make build-all
 ```
+
+Isso produz artefatos distintos por idioma e variante em `out/`, como `pt-base.pdf`, `en-base.pdf`, `pt-backend.pdf` e `en-backend.pdf`.
 
 Gerar apenas as versoes em portugues:
 
@@ -92,7 +94,7 @@ Para compilar um arquivo especifico:
 make build FILE=src/versions/pt/base.tex
 ```
 
-Sem `FILE`, `make build` compila todas as variantes.
+Sem `FILE`, `make build` compila todas as variantes. Com `FILE`, o PDF tambem e gerado com prefixo do idioma, por exemplo `out/pt-base.pdf`.
 
 ## Testes
 
