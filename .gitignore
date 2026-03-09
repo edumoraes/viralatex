@@ -2,6 +2,10 @@ out/
 .texlive-cache/
 .latexmkrc
 temp/
+repos/
+Profile.pdf
+example-format.pdf
+backend.pdf
 *.aux
 *.fdb_latexmk
 *.fls
