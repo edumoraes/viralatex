@@ -1,393 +1,221 @@
-# Resume Tailoring Web Application Architecture
+# Resume Studio Desktop Architecture
 
 ## Summary
-This architecture evolves the current repository from a file-based LaTeX resume generator into a Rails-based web application with structured persistence, asynchronous AI workflows, and an isolated compile engine.
+This repository currently implements a local-first desktop bootstrap for resume management and rendering. The architecture combines four active layers:
 
-The initial implementation is a `modular monolith` built with Ruby on Rails and Postgres. It keeps one deployable application for speed of delivery, but enforces clear module boundaries so the compile engine and AI orchestration can be extracted later if scale or operational needs require it.
+- legacy LaTeX presentation assets in `src/`
+- a React and TypeScript desktop frontend in `desktop/src/`
+- a Rust and Tauri backend in `desktop/src-tauri/src/`
+- a filesystem-backed sample workspace in `examples/sample-workspace/`
 
-The current LaTeX assets remain valuable. The `resume.cls` layout, composition patterns, and compilation flow become the seed of the rendering subsystem. They are no longer the source of truth for user data.
+The repository is not a web application and does not currently use Rails, Postgres, background jobs, or server-side persistence. The active architecture is a desktop client that reads structured files from disk and renders PDFs locally.
 
 ## Architecture Goals
-- preserve the current PDF quality and LaTeX rendering strengths
-- move canonical data storage to Postgres
-- support a prompt-first UX without sacrificing structured persistence
-- keep AI integrations isolated behind provider adapters
-- run expensive or failure-prone work asynchronously
-- maintain traceability from every PDF back to approved source content
+- preserve the current PDF quality from the LaTeX layer
+- treat the filesystem as the canonical source of user data
+- expose workspace and render operations through a local desktop UI
+- keep the rendering pipeline inspectable and debuggable
+- maintain a strong local quality workflow with lint, test, and security checks
 
 ## System Context
 ### External actors
-- end user managing their professional profile and resume versions
-- LLM provider used for extraction, scoring, translation, and rewrite tasks
-- file or object storage used for generated PDF artifacts and optional logs
+- end user operating the desktop app
+- local filesystem holding the workspace
+- local render toolchain used by the Rust backend
 
 ### Internal subsystems
-- web application
-- domain services
-- AI orchestration
-- compile engine
-- background job processing
-- persistence layer
-
-## High-Level Topology
-Version 1 uses a Rails modular monolith with these logical modules:
-
-### 1. Web App
-Handles HTTP requests, authentication, pages, forms, and chat-like authoring flows. This module owns the user-facing interaction model and delegates business logic to domain services.
-
-### 2. Domain
-Owns the core business entities and workflows:
-
-- profiles
-- raw intake
-- blocks
-- block variants
-- job targets
-- resumes
-- resume versions
-- suggestions
-- renders
-
-This module decides what data is canonical, what requires approval, and what transitions are legal.
-
-### 3. AI Orchestration
-Builds prompts, calls provider adapters, validates output shape, stores prompt and response metadata, and translates AI output into domain-level commands or suggestions.
-
-### 4. Compile Engine
-Transforms an approved resume version into temporary LaTeX files, runs the LaTeX build, captures logs, and stores resulting artifacts. This module is isolated because LaTeX compilation is operationally expensive and can fail independently from the web request flow.
-
-### 5. Async Jobs
-Executes long-running extraction, proposal, translation, and render jobs outside the request-response path.
-
-## Recommended Runtime Stack
-- `Ruby on Rails` as the fullstack application framework
-- `Postgres` as the system of record
-- `Sidekiq` or another durable Rails-compatible queue backend for asynchronous jobs
-- `Redis` if Sidekiq is used
-- object storage abstraction for generated PDFs and logs
-- Dockerized LaTeX runtime derived from the current repository setup
-
-## Reuse of the Existing Repository
-### What is reused directly
-- `src/template/resume.cls` as the initial default template class
-- the current LuaLaTeX and `latexmk` compilation approach
-- the Dockerized build model for LaTeX execution
-- the modular section concept as inspiration for runtime block assembly
-
-### What changes conceptually
-- `.tex` files in `src/versions/...` stop being the source of truth for user resumes
-- shared sections become application-driven render templates or partial generators
-- user content moves to database-backed domain records
-- generated `.tex` files become ephemeral build artifacts created from approved resume versions
-
-### Practical migration stance
-In the first application version, the existing LaTeX class and layout conventions should be preserved as much as possible. The system should focus on generating temporary `.tex` entrypoints from structured data rather than redesigning the visual template layer.
-
-## Canonical Domain Model
-### User
-Owns all profile, block, target, and render data.
-
-### Profile
-Stores identity, contact details, localization preferences, and default resume preferences.
-
-### Raw Intake
-Stores user-submitted freeform content before normalization. Examples include pasted resumes, career narratives, LinkedIn-like summaries, project notes, and follow-up prompts.
-
-Key fields:
-- `user_id`
-- `source_text`
-- `source_type`
-- `language`
-- `status`
-- `created_at`
-
-### Block
-Represents a reusable unit of professional evidence or narrative.
-
-Examples:
-- summary fragment
-- experience
-- project
-- education
-- certification
-- skill
-- custom block
-
-Key fields:
-- `user_id`
-- `block_type`
-- `canonical_label`
-- `normalized_data` as JSONB
-- `source_intake_id`
-- `confidence_score`
-- `status` such as proposed, approved, rejected, superseded
-- `provenance_metadata`
-
-### Block Variant
-Represents a language-specific or style-specific rendering of a block while preserving the same block identity.
-
-Key fields:
-- `block_id`
-- `language`
-- `content`
-- `tone`
-- `created_by` as user or AI
-- `approval_state`
-
-### Job Target
-Represents one target opportunity.
-
-Key fields:
-- `user_id`
-- `company_name`
-- `role_title`
-- `job_description`
-- `target_language`
-- `notes`
-
-### Resume
-Logical container for versions associated with a job target.
-
-### Resume Version
-Represents one concrete proposed or approved assembly of a tailored resume.
-
-Key fields:
-- `resume_id`
-- `language`
-- `selected_block_ids`
-- `section_order`
-- `summary_strategy`
-- `status` such as draft, proposed, approved, rendered, failed
-- `proposal_metadata`
-- `diff_metadata`
-
-### Suggestion
-Represents one AI-proposed mutation that can be accepted or rejected.
-
-Examples:
-- include this block
-- remove that block
-- rewrite this experience
-- translate this project
-- move projects ahead of education
-
-Key fields:
-- `resume_version_id`
-- `suggestion_type`
-- `target_ref`
-- `rationale`
-- `payload`
-- `status`
-
-### Render
-Represents one asynchronous compile attempt.
-
-Key fields:
-- `resume_version_id`
-- `status`
-- `latex_source_path` or stored source reference
-- `pdf_artifact_path`
-- `build_log`
-- `error_summary`
-
-## Prompt-First but Structured
-The UI is intentionally freeform. The user can describe their experience conversationally and ask for refinements in natural language. Internally, the system must not remain freeform.
-
-The required pattern is:
-
-1. capture raw input exactly as submitted
-2. extract typed candidate blocks through AI orchestration
-3. validate output shape and store normalized records
-4. require approval before a block becomes canonical for reuse
-
-This constraint is non-negotiable because reuse, translation, ranking, and rendering all depend on stable structured entities.
-
-## AI Orchestration Design
-### Responsibilities
-- map domain use cases into prompt contracts
-- call the configured provider through a provider-neutral adapter
-- validate, normalize, and persist structured outputs
-- create explicit suggestions rather than silently mutating approved content
-- log model, prompt version, and execution metadata for traceability
-
-### Provider abstraction
-The application should define an adapter boundary with operations such as:
-
-- `extract_blocks(raw_intake)`
-- `rewrite_block(block, target_context)`
-- `translate_block(block_variant, target_language)`
-- `score_job_fit(job_target, candidate_blocks)`
-- `propose_resume(job_target, approved_blocks)`
-
-This keeps the domain isolated from provider-specific SDKs and allows future support for multiple providers without rewriting core business logic.
-
-### Safety constraints
-- AI must not directly overwrite approved canonical records without producing reviewable suggestions
-- the system must preserve provenance linking extracted or rewritten content back to source material
-- low-confidence outputs should be marked for extra review
-- prompts should explicitly discourage unsupported claims and fabrication
-
-## Resume Assembly Pipeline
-### 1. Raw intake submission
-The user submits freeform source material. The system stores it as `Raw Intake`.
-
-### 2. Extraction job
-An async job calls the AI extraction flow, producing typed candidate blocks and optional block variants.
-
-### 3. Review flow
-The user reviews proposed blocks and approves, edits, merges, or rejects them.
-
-### 4. Job target submission
-The user creates a `Job Target` from a job description and optional metadata.
-
-### 5. Proposal job
-An async job evaluates job fit and creates a `Resume Version` proposal using approved blocks plus explicit `Suggestions`.
-
-### 6. Approval flow
-The user reviews the proposed version, accepts or rejects individual suggestions, and approves the assembled draft.
-
-### 7. Render job
-A compile job receives the approved `Resume Version`, generates temporary `.tex` artifacts, compiles them, stores logs and PDF, and updates the `Render` record.
-
-### 8. Delivery
-The user downloads the generated PDF and can later clone or revise the same resume for another target.
-
-## Render Architecture
-### Render input contract
-The compile engine receives a fully resolved, approved resume version, including:
-
-- resolved profile data
-- selected blocks
-- selected block variants or required target language
-- section ordering
-- template identifier
-- render options
-
-### Render processing
-The engine should:
-
-1. map structured records into LaTeX-safe content
-2. inject content into a generated temporary `.tex` document
-3. reference the maintained `resume.cls` and supporting template assets
-4. execute `latexmk -lualatex` inside an isolated runtime
-5. capture the PDF and logs
-
-### Isolation
-Compilation should not run inline in the web process. It should run in a worker context, preferably containerized using the current Docker-based LaTeX environment or an equivalent isolated runtime. This keeps failures, timeouts, and package-specific issues away from the request path.
-
-## Application Interfaces
-The exact Rails controller naming can change, but the architecture should support workflow-level interfaces equivalent to:
-
-- `POST /profiles/intake`
-- `POST /blocks/extract`
-- `POST /job_targets`
-- `POST /resumes/propose`
-- `POST /resume_versions/:id/approve`
-- `POST /resume_versions/:id/render`
-- `GET /renders/:id`
-
-These represent system capabilities, not final route declarations.
-
-## Persistence and Storage Strategy
-### Postgres
-Postgres is the canonical store for:
-
-- users
-- profiles
-- raw intake
-- blocks
-- block variants
-- job targets
-- resumes
-- resume versions
-- suggestions
-- render metadata
-- LLM execution metadata
-
-Use JSONB where flexibility is beneficial, especially for `normalized_data`, `proposal_metadata`, `diff_metadata`, and provider-specific metadata. Keep lifecycle state and query-critical fields modeled explicitly in relational columns.
-
-### File storage
-Generated artifacts should be stored outside the database body:
-
-- rendered PDFs
-- optional generated `.tex` snapshots
-- compile logs if large
-
-The DB stores references, status, and summary metadata.
-
-## State and Approval Rules
-- raw intake is never treated as canonical resume data by itself
-- blocks become reusable only after user approval
-- suggestions never silently apply themselves to approved content
-- a resume version can be rendered only after approval
-- each render must be traceable to one approved resume version
-
-## Failure Modes
-### LLM failures
-- provider timeout or API error
-- malformed structured response
-- low-confidence extraction
-- unsupported translation or rewrite quality
-
-Response:
-- keep the raw intake or current draft intact
-- mark the job as failed or requiring review
-- surface a recoverable retry path
-
-### Compile failures
-- malformed LaTeX escaping
-- missing template asset
-- incompatible generated content
-
-Response:
-- store logs and summarized error metadata
-- keep the approved resume version unchanged
-- allow re-render after correction
-
-## Security and Trust Considerations
-- escape and sanitize all user-generated content before LaTeX compilation
-- isolate compilation to reduce blast radius from malformed content
-- preserve auditability of AI-generated changes
-- avoid hidden auto-rewrites that the user did not approve
-
-## Scalability Path
-The modular monolith should preserve clear seams for later extraction:
-
-### Likely first extraction
-The compile engine can become a dedicated render service if:
-- render traffic increases
-- compile isolation needs become stricter
-- job throughput or queue contention grows
-
-### Possible later extraction
-AI orchestration can become its own service if provider routing, prompt management, or model governance becomes materially complex.
-
-The initial architecture should keep these as internal modules with well-defined service interfaces so extraction is a deployment decision, not a domain redesign.
-
-## Suggested Implementation Phases
-### Phase 1
-- bootstrap Rails app and Postgres schema
-- implement auth and profile basics
-- model raw intake, blocks, job targets, resumes, suggestions, and renders
-- wrap current LaTeX engine in a worker-driven render module
-
-### Phase 2
-- add AI extraction and review workflow
-- add job-target analysis and resume proposal generation
-- add PT and EN block variant support
-
-### Phase 3
-- improve observability, retries, and template controls
-- optimize assembly quality and explanation UX
-- prepare extraction seams if operational pressure justifies it
-
-## Acceptance Criteria
-The architecture is successful for v1 when it supports these guarantees:
-
-- canonical resume data lives in Postgres, not hand-maintained `.tex` files
-- prompt-first user interaction still results in reusable typed internal blocks
-- every AI-generated change is reviewable
-- every rendered PDF is traceable to an approved resume version
-- LaTeX compilation is asynchronous and isolated
-- the existing LaTeX layout system is reused as the initial rendering layer
-- PT and EN are first-class output languages, with room for more languages later
+- React UI
+- Tauri command surface
+- Rust workspace loader and renderer
+- LaTeX template assets
+- repository quality tooling
+
+## Runtime Topology
+### 1. Frontend
+The frontend lives in `desktop/src/` and is built with React, TypeScript, and Vite. It is responsible for:
+
+- collecting a workspace path from the user
+- triggering sample workspace creation
+- opening an existing workspace
+- showing workspace summary data
+- listing blocks and resume definitions
+- triggering resume rendering and showing the result
+
+The frontend does not own persistence. It is a thin orchestration layer over Tauri commands.
+
+### 2. Tauri command layer
+The command layer lives primarily in `desktop/src-tauri/src/lib.rs`. It exposes the desktop capabilities to the frontend through Tauri commands:
+
+- `create_sample_workspace`
+- `select_workspace`
+- `load_workspace_summary`
+- `list_blocks`
+- `list_resumes`
+- `render_resume`
+- `get_render_status`
+
+This layer also manages in-memory app state such as the selected workspace and recent render history.
+
+### 3. Rust domain and file services
+The Rust backend loads and validates the workspace using modules in `desktop/src-tauri/src/`:
+
+- `workspace.rs`: filesystem validation, loading, and sample workspace creation
+- `domain.rs`: serializable data structures shared across the app boundary
+- `renderer.rs`: local render orchestration and artifact generation
+- `app_state.rs`: selected workspace and render history
+
+This layer treats YAML files in the workspace as the source of truth.
+
+### 4. LaTeX rendering assets
+The rendering foundation still comes from the maintained LaTeX assets:
+
+- `src/template/resume.cls`
+- `src/shared/profile.tex`
+- `src/shared/sections/<lang>/`
+- `src/versions/<lang>/`
+
+The desktop renderer does not ask the user to edit these files directly. Instead, it reuses the template model and generates temporary files needed for a render attempt.
+
+## Workspace Architecture
+The workspace is a directory tree on disk. The sample implementation in `examples/sample-workspace/` demonstrates the expected shape:
+
+- `profile/`: profile identity data in YAML
+- `blocks/`: reusable content blocks grouped by topic
+- `resumes/`: resume definitions describing variants to render
+- `renders/`: output PDFs and logs created by render attempts
+- `.cache/`: local render cache area when needed
+
+The workspace model is intentionally file-based:
+
+- easy to inspect with normal tools
+- easy to version with Git
+- easy to copy, back up, and diff
+- independent of any database or backend service
+
+## Data Flow
+### Create sample workspace
+1. The frontend sends a path to `create_sample_workspace`.
+2. Rust copies the bundled sample workspace into that location.
+3. Rust sets the selected workspace in app state.
+4. The frontend refreshes summary, blocks, and resumes.
+
+### Open existing workspace
+1. The frontend sends a path to `select_workspace`.
+2. Rust canonicalizes the path and validates the workspace structure.
+3. Rust stores the selected workspace in app state.
+4. The frontend requests summary, blocks, and resumes.
+
+### Render resume
+1. The frontend sends a `resumeId` to `render_resume`.
+2. Rust loads the selected workspace, profile, blocks, and resume definitions.
+3. Rust resolves the target resume definition.
+4. Rust generates temporary render inputs and invokes the local render flow.
+5. Rust writes artifacts into the workspace `renders/` directory.
+6. Rust returns a `RenderResult` with status, output path, log path, and optional error message.
+
+## Rendering Pipeline
+The renderer is implemented in `desktop/src-tauri/src/renderer.rs`.
+
+Its responsibilities are:
+
+- create a temporary render directory
+- copy or synthesize the LaTeX assets needed for one render
+- write generated profile and section files
+- write a render entrypoint
+- invoke the local TeX toolchain
+- copy the produced PDF and logs into the workspace
+- return a structured render result
+
+Design constraints:
+
+- rendering is local, not remote
+- artifacts should remain inspectable after each run
+- failures should be captured as explicit status plus log path
+- the template quality from the legacy LaTeX layer should remain unchanged unless intentionally edited
+
+## State Model
+The current app state is deliberately small:
+
+- `selected_workspace`: canonical path of the active workspace
+- `render_history`: in-memory map of recent render results by job id
+
+This is sufficient for the current bootstrap. There is no persistent application database yet.
+
+## Interface Contracts
+### Frontend to backend
+The boundary between React and Rust is the Tauri invoke contract. The commands return serializable domain types such as:
+
+- `WorkspaceSummary`
+- `Block`
+- `ResumeDefinition`
+- `RenderResult`
+
+These types are defined in Rust and mirrored structurally in the frontend TypeScript code.
+
+### Filesystem to backend
+The backend expects stable workspace conventions:
+
+- valid YAML files
+- known folder layout
+- predictable identifiers for blocks and resumes
+
+If those assumptions fail, the backend returns user-visible errors rather than trying to recover silently.
+
+## Build and Quality Architecture
+Repository quality is enforced through layered local commands:
+
+- `make test`: repository structure and documented entrypoint checks
+- `make lint`: frontend ESLint, Rust `fmt`, and Rust `clippy`
+- `make security`: secret scanning plus `npm audit` and `cargo audit`
+- `bin/pre-push-check`: baseline push gate with `make test`, desktop build, and Rust tests
+
+Git hook orchestration is handled by `pre-commit` with both `pre-commit` and `pre-push` stages enabled. This keeps quality checks close to local development instead of relying only on manual discipline.
+
+## Key Tradeoffs
+### Filesystem over database
+The current product chooses local files over a DB because:
+
+- the product is still validating the workspace model
+- local ownership and inspectability are primary goals
+- it reduces moving parts during the bootstrap phase
+
+Tradeoff:
+- validation and migrations are more manual than in a database-backed system
+
+### Desktop over web
+The current product chooses a desktop runtime because:
+
+- rendering is local and toolchain-dependent
+- local files are already the canonical source
+- the shortest path to validating the product is a desktop shell
+
+Tradeoff:
+- distribution and environment consistency are harder than in a pure hosted web app
+
+### Template reuse over redesign
+The architecture keeps the existing LaTeX assets because:
+
+- they already solve presentation quality
+- changing UX and changing layout at the same time would increase risk
+
+Tradeoff:
+- the renderer must adapt to legacy template constraints
+
+## Current Limitations
+- no in-app editing of workspace content yet
+- no persistent DB for indexing or history
+- no cloud sync
+- no AI extraction, rewrite, or targeting workflows
+- no background job system beyond local command execution
+- render success still depends on the local environment and available binaries
+
+## Future Extension Path
+The current architecture is intended to support future additions without discarding the desktop and filesystem foundation:
+
+- richer workspace editing in the UI
+- stronger workspace validation and schema evolution
+- optional local indexing or SQLite support
+- AI-assisted authoring and tailoring
+- packaging of required render binaries with the app
+
+These are extensions, not current architecture commitments.

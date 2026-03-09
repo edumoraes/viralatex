@@ -1,242 +1,188 @@
-# Resume Tailoring Web Application PRD
+# Resume Studio Desktop PRD
 
 ## Summary
-This product turns the current LaTeX resume generator into a web application that helps a professional maintain a complete career knowledge base and rapidly assemble tailored resumes for specific job applications.
+Resume Studio is a local-first desktop application for managing structured resume workspaces and rendering PDFs locally. It combines a Tauri desktop shell, a React and TypeScript frontend, a Rust backend, and the existing LaTeX resume assets that still power the final document layout.
 
-Version 1 is a fullstack web application built around three principles:
+The current product goal is to validate the desktop foundation end to end:
 
-- the user works primarily through natural language, not manual LaTeX editing
-- the system converts raw input into reusable structured resume blocks
-- every job-specific resume is proposed by AI, reviewed by the user, and rendered to PDF through the existing LaTeX engine
-
-The current repository already solves the final presentation problem well. In v1, that LaTeX foundation becomes the rendering layer of a larger product that manages profile data, reusable content blocks, job targeting, AI suggestions, and versioned outputs.
+- create or open a local workspace on disk
+- inspect structured profile, block, and resume data from YAML files
+- render a real PDF locally through the maintained LaTeX template pipeline
+- keep the workflow offline-friendly and auditable
 
 ## Problem
-Maintaining a resume for multiple job applications is repetitive and slow. Most candidates keep fragmented information across old resumes, LinkedIn, notes, portfolios, and memory. Tailoring a resume for each opportunity usually means rewriting similar content, translating sections manually, and deciding under time pressure what should be emphasized.
+The current LaTeX-only workflow produces good PDFs, but it is still file-centric and manual. Maintaining multiple resume variants directly in TeX is efficient for output quality, but weak for product usability.
 
-This leads to four recurring problems:
+The main problems this product addresses now are:
 
-- the full professional history is not captured in one reusable system
-- tailoring for each vacancy takes too long
-- translation and rewriting quality is inconsistent
-- the final resume often does not align well with the target role
+- managing resume data directly in source files is too technical for normal editing flows
+- there is no guided application for opening, validating, and rendering a resume workspace
+- rendering success depends on local tooling that is not surfaced through a user-facing interface
+- the future product needs a local foundation before adding more advanced authoring or AI flows
 
 ## Product Vision
-The application becomes a personal resume operating system:
+The application should become a local resume workstation:
 
-- it stores the user's complete professional history
-- it breaks that history into reusable blocks
-- it evaluates a target job description against available blocks
-- it proposes a high-adherence resume draft for the specific job
-- it helps translate, rewrite, reorder, and refine content
-- it renders an approved PDF using a high-quality LaTeX template
+- the filesystem is the source of truth
+- the desktop app is the main interaction surface
+- structured blocks and resume definitions live in a workspace folder
+- rendering happens locally with explicit logs and outputs
+- future AI-assisted authoring can be added on top without changing the local-first foundation
 
-The product is a copilot, not an autopilot. AI helps generate and refine options, but the user remains responsible for approving what will be used in the final resume.
+The product is currently a bootstrap, not a full resume operating system. It should prove the local workspace model and rendering pipeline before broader product expansion.
 
 ## Target User
 ### Primary audience
-Single professionals who want to maintain a high-quality career profile and quickly generate tailored resumes for different applications.
+- individual professionals managing their own resumes locally
+- technical users comfortable running a desktop app and storing files in a workspace directory
 
 ### Initial user profile
 - software engineers and adjacent technical professionals
-- professionals applying to multiple positions in PT-BR and English
-- users comfortable describing their experience in natural language, but not interested in editing LaTeX or manually assembling multiple resume versions
+- bilingual users working in PT-BR and English
+- users who want local control over source files and generated PDFs
 
 ## Goals
-### Business and product goals
-- reduce the time required to create a tailored resume for a new job application
-- improve the relevance of resume content to the target vacancy
-- centralize all professional information in one reusable system
-- preserve high-quality PDF output through LaTeX
+### Product goals
+- validate a local-first desktop product shell
+- preserve high-quality PDF output using the existing LaTeX template
+- establish a structured workspace model that the UI can load and render
+- keep the foundation compatible with future expansion such as richer editing or AI assistance
 
 ### User goals
-- describe my full history once and reuse it many times
-- ask the system to tailor a resume for a specific vacancy
-- receive suggestions for what to include, remove, rewrite, or translate
-- approve the final version before generating the PDF
+- create a sample workspace quickly
+- open an existing workspace from disk
+- inspect available profile, block, and resume data
+- render a selected resume and find the generated PDF and logs
 
-## Non-Goals for v1
-- recruiter-facing features
-- collaborative editing or agency workflows
-- billing and subscription management
-- direct LaTeX editing by end users
-- an open template marketplace
-- advanced analytics for application outcomes
-- fully autonomous resume generation without explicit user approval
+## Non-Goals for the current version
+- user accounts, sign-in, or multi-user collaboration
+- cloud sync or server-backed persistence
+- recruiter-facing workflows
+- conversational authoring or AI-assisted extraction
+- job description analysis and targeting
+- automatic resume tailoring
+- end-user editing of raw LaTeX files inside the app
 
 ## Core Principles
-- `Prompt-first UX`: the main interaction model is freeform natural language
-- `Structured persistence`: the backend normalizes content into reusable typed blocks
-- `Human approval`: important content changes and final resume generation require approval
-- `Versioned outputs`: each generated resume is tied to a specific target opportunity and version history
-- `LaTeX-first rendering`: final output quality is handled by the existing template engine
-- `Extensible localization`: PT and EN are mandatory in v1, but the model must support additional languages later
+- `Local-first`: user data lives in workspace files on disk
+- `Structured filesystem`: profile, blocks, and resume definitions are stored as explicit files and folders
+- `Desktop-native`: the primary product runtime is a local desktop app, not a web app
+- `Renderable truth`: every supported workspace should map to a real local render attempt
+- `Template continuity`: the existing LaTeX assets remain the source of presentation quality
+- `Auditability`: outputs, logs, and source files should stay inspectable by the user
 
 ## User Journey
-### 1. Profile setup
-The user creates an account and starts describing their background in natural language. They can paste long-form summaries, old resumes, LinkedIn-style content, project notes, or job history.
+### 1. Start the app
+The user opens the desktop application and sees the local-first bootstrap interface.
 
-### 2. AI-assisted ingestion
-The system parses that raw input and proposes reusable blocks, such as:
+### 2. Create or open a workspace
+The user either creates a sample workspace in a chosen directory or opens an existing workspace path.
 
-- professional summary fragments
-- experiences
-- projects
-- education items
-- certifications
-- skills
-- custom evidence blocks
+### 3. Inspect workspace contents
+The app loads a workspace summary, lists reusable content blocks, and lists available resume definitions.
 
-Each proposed block includes extracted fields, source traceability, and confidence indicators where relevant.
+### 4. Select a resume
+The user chooses one of the available resume definitions from the workspace.
 
-### 3. Review and approval
-The user reviews extracted blocks, accepts them, edits them, or rejects them. Approved blocks become part of the reusable professional knowledge base.
+### 5. Render locally
+The app invokes the Rust backend to compose temporary render artifacts and run the local PDF build flow.
 
-### 4. Job targeting
-The user pastes a job description and optionally specifies company, role title, preferred language, and emphasis preferences.
-
-### 5. Resume proposal
-The system analyzes the target vacancy, evaluates available blocks, and proposes:
-
-- which blocks should be included
-- recommended ordering
-- suggested rewrites
-- suggested translations
-- suggested emphasis changes
-- coverage gaps or missing evidence
-
-### 6. Draft approval
-The user reviews the proposed tailored resume and accepts or rejects suggestions before generating the final document.
-
-### 7. Render and download
-The system compiles an approved version through the LaTeX rendering engine and returns a PDF with associated version metadata.
+### 6. Review output
+The user sees render status plus the output PDF path and log path inside the workspace renders directory.
 
 ## Key Features
-### 1. Professional knowledge base
-- store the complete professional profile in a reusable system of blocks
-- preserve source text and normalized content
-- maintain approval state and provenance
+### 1. Local workspace management
+- create a sample workspace from bundled examples
+- open an existing workspace by absolute path
+- validate workspace structure before use
 
-### 2. Prompt-first authoring
-- allow users to add and refine content through conversational or freeform input
-- support iterative follow-up prompts such as "rewrite this for senior backend roles" or "make this stronger in English"
+### 2. Structured content loading
+- load profile data
+- load blocks from YAML files
+- load resume definitions from YAML files
+- summarize available languages and content counts
 
-### 3. AI extraction and normalization
-- transform raw input into typed internal blocks
-- identify missing fields, ambiguities, and overlap
-- capture confidence and rationale for traceability
+### 3. Local PDF rendering
+- transform workspace content into render-ready temporary files
+- reuse the maintained resume class and template assets
+- produce a PDF and a log file in the workspace
 
-### 4. Job-fit analysis
-- evaluate the alignment between a vacancy and the user's existing blocks
-- highlight the strongest matching evidence
-- point out missing qualifications or weak coverage
+### 4. Clear render feedback
+- show render status in the UI
+- expose output paths for PDF and logs
+- keep failures visible and local
 
-### 5. Resume assembly suggestions
-- propose a tailored set of blocks for a specific opportunity
-- suggest ordering, wording, language, and emphasis changes
-- keep all changes reviewable before finalization
-
-### 6. Translation and rewriting
-- support PT and EN content generation in v1
-- distinguish between original block meaning and language-specific variants
-- preserve user-approved versions for reuse
-
-### 7. PDF rendering
-- convert an approved resume version into LaTeX
-- compile the final PDF using the current class and layout system
-- store logs and output artifacts for troubleshooting
+### 5. Developer quality workflow
+- repository-level structural checks through `make test`
+- lint and static checks for frontend, Rust, and shell tooling
+- local `pre-commit` and `pre-push` hooks for consistent validation
 
 ## Functional Requirements
-### Accounts and identity
-- users can register and sign in
-- each user owns one professional profile in v1
-- all profile, block, and resume data is isolated per user
+### Desktop shell
+- the product must run as a Tauri desktop application
+- the UI must call Rust commands through Tauri invoke handlers
 
-### Profile intake
-- users can submit freeform raw content at any time
-- the system stores raw intake separately from approved blocks
-- the system can process multiple intake submissions over time
+### Workspace model
+- a workspace must be loaded from the filesystem
+- a workspace must contain a profile, blocks, and resume definitions in the expected structure
+- the app must reject invalid workspaces with clear error messages
 
-### Block lifecycle
-- the system creates typed candidate blocks from intake
-- the user can approve, edit, merge, or reject proposed blocks
-- approved blocks remain reusable across many target resumes
-
-### Job targeting
-- users can create a target opportunity from a pasted job description
-- a target opportunity can include optional metadata such as company, title, language, and notes
-
-### Resume generation
-- the system can create a proposed resume draft from approved blocks plus a target opportunity
-- the system records the selected blocks, order, language, and AI suggestions
-- the user must approve the draft before final PDF generation
-
-### Suggestions
-- suggestions are explicit objects that can be accepted or rejected
-- suggestions may include selection changes, rewrites, translations, reorderings, or warnings
-- suggestions must include rationale
+### Content visibility
+- the app must show workspace summary information
+- the app must list blocks and resume definitions after a workspace is loaded
 
 ### Rendering
-- only approved resume versions can be rendered to final PDF
-- each render stores status, logs, output file reference, and source version reference
+- the user must be able to render a selected resume definition
+- a render attempt must return status plus output and log paths when available
+- rendered artifacts must be written into the workspace renders directory
+
+### Sample bootstrap
+- the app must be able to create a sample workspace from bundled example assets
 
 ## Data Model Concepts
-These are product-level concepts that the architecture must support:
-
-- `User`: authenticated owner of the profile
-- `Profile`: canonical professional identity and global preferences
-- `Raw Intake`: freeform source material submitted by the user
-- `Block`: reusable unit of resume content
-- `Block Variant`: language-specific or style-specific representation of a block
-- `Job Target`: a job description plus metadata for one opportunity
-- `Resume`: logical grouping for a target opportunity
-- `Resume Version`: a specific assembled draft with selected blocks and suggestions
-- `Suggestion`: an AI-proposed change requiring review
-- `Render`: an asynchronous compile attempt that produces artifacts
+- `Workspace`: local root directory containing the resume data model
+- `Profile`: identity and contact information for the owner of the workspace
+- `Block`: reusable unit of resume content such as summary, experience, project, skill, or education item
+- `Resume Definition`: a file-backed selection of blocks and metadata for one resume variant
+- `Render Result`: status and artifact references for one local render attempt
 
 ## Languages and Localization
-- PT and EN are required in v1
-- the domain must support more languages later without redesigning the core entities
-- content identity and translated representation must be distinct concepts
-- job targeting and output generation must allow a requested output language independent of the source intake language
+- PT and EN are the required languages today
+- the sample workspace and template pipeline must support both languages
+- the product should keep the workspace model extensible for more languages later
 
 ## UX Requirements
-- the primary authoring surface should feel like guided natural-language interaction
-- the user must still be able to inspect what the system extracted and plans to use
-- the user should see why a block or suggestion was selected for a job
-- the user should be able to compare resume versions for different opportunities
-- the product should make the review step explicit before final generation
+- the UI should make the local workspace model obvious
+- the app should keep actions simple: create, open, inspect, render
+- the app should show enough feedback for debugging local render failures
+- the app should not hide where artifacts are stored
 
 ## Success Metrics
 ### Core product metrics
-- median time from pasted job description to approved tailored resume draft
-- median time from approved draft to rendered PDF
-- acceptance rate of AI suggestions
-- percent of job-targeted resumes successfully rendered
-- reuse rate of approved blocks across multiple opportunities
+- a new user can create a sample workspace and render a PDF locally without editing source files
+- an existing valid workspace loads successfully
+- render failures produce actionable local logs
+- PT and EN sample resumes render through the same product flow
 
 ### Quality metrics
-- user-rated relevance of the tailored resume to the target vacancy
-- user-rated quality of translations and rewrites
-- frequency of manual corrections after AI extraction
-- frequency of failed or rejected resume proposals
+- local build and validation commands stay green
+- hook-based checks catch formatting, lint, and security issues before push
+- rendered output remains consistent with the maintained LaTeX template quality
 
 ## Risks
-- low-quality extraction from noisy freeform input
-- AI suggestions introducing unsupported claims or exaggeration
-- translation that changes intended meaning
-- compile failures caused by malformed generated LaTeX
-- over-automation reducing user trust
+- local rendering depends on external binaries such as Tectonic or the configured toolchain
+- filesystem-driven workflows can fail on invalid paths or malformed workspace files
+- the desktop bootstrap may remain too technical if richer editing flows are delayed
+- future AI or database features could overcomplicate the local-first architecture if added too early
 
-## Release Scope for v1
-Version 1 ships when the product can do the following end to end:
+## Release Scope for the current version
+The current version is complete when it does the following reliably:
 
-- accept freeform professional history from a single authenticated user
-- normalize it into reusable blocks with AI assistance
-- let the user approve those blocks
-- accept a target job description
-- propose a tailored PT or EN resume draft with explicit suggestions
-- let the user approve the draft
-- render and deliver a PDF using the existing LaTeX presentation layer
+- creates a sample workspace
+- opens a valid existing workspace
+- loads profile, blocks, and resume definitions
+- renders a selected resume locally to PDF
+- exposes output and log paths to the user
+- remains supported by repeatable local lint, test, and security checks
 
-Anything beyond that is secondary to achieving a reliable end-to-end tailoring workflow.
+Anything beyond that is future work on top of the validated desktop foundation.
