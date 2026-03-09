@@ -1,8 +1,8 @@
-# Curriculo em LaTeX
+# Currículo em LaTeX
 
-Projeto LaTeX para manter multiplas versoes do curriculo com base compartilhada, suporte bilingue e compilacao via Docker.
+Projeto LaTeX para manter múltiplas versões do currículo com base compartilhada, suporte bilíngue e compilação via Docker.
 
-O build configura `TEXINPUTS` automaticamente para que classes e secoes compartilhadas sejam resolvidas sem depender de caminhos relativos frageis.
+O build configura `TEXINPUTS` automaticamente para que classes e seções compartilhadas sejam resolvidas sem depender de caminhos relativos frágeis. A compilação usa LuaLaTeX por padrão para preservar texto Unicode e glifos de pt-BR no PDF final.
 
 ## Estrutura
 
@@ -21,7 +21,7 @@ src/
 out/
 ```
 
-- `src/template/resume.cls`: layout e macros compartilhadas.
+- `src/template/resume.cls`: layout, macros compartilhadas e configuração tipográfica compatível com LuaLaTeX.
 - `src/shared/profile.tex`: identidade, contatos e links reutilizaveis.
 - `src/shared/sections/<idioma>/`: secoes reutilizaveis por idioma.
 - `src/versions/<idioma>/`: pontos de entrada compilaveis para cada variante.

@@ -1,6 +1,6 @@
 IMAGE_NAME ?= curriculo-latex
 LATEXMK ?= latexmk
-LATEXMK_ENGINE ?= -pdf
+LATEXMK_ENGINE ?= -lualatex
 FILE ?=
 TEXINPUTS_VALUE = /workspace/src/template//:/workspace/src/shared//:/workspace/src/shared/sections//:
 LATEXMK_FLAGS = $(LATEXMK_ENGINE) -interaction=nonstopmode -halt-on-error -output-directory=out

@@ -6,11 +6,23 @@
 \RequirePackage[a4paper,left=1.48cm,right=1.48cm,top=1.24cm,bottom=1.38cm]{geometry}
 \RequirePackage{array}
 \RequirePackage{enumitem}
-\RequirePackage[T1]{fontenc}
+\RequirePackage{iftex}
 \RequirePackage[hidelinks]{hyperref}
 \RequirePackage{microtype}
 \RequirePackage{tabularx}
 \RequirePackage{xcolor}
+
+\ifLuaTeX
+  \RequirePackage{fontspec}
+  \defaultfontfeatures{Ligatures=TeX}
+  \setmainfont{Latin Modern Roman}[
+    SmallCapsFont=lmromancaps10-regular.otf
+  ]
+\else
+  \RequirePackage[utf8]{inputenc}
+  \RequirePackage[T1]{fontenc}
+  \RequirePackage{lmodern}
+\fi
 
 \pagestyle{empty}
 \setlength{\parindent}{0pt}
