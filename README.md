@@ -52,6 +52,40 @@ TECTONIC_BIN=/path/to/tectonic npm run tauri:dev
 
 The bootstrap already supports a bundled local binary at `desktop/src-tauri/binaries/tectonic`, which is the preferred model for future app distribution.
 
+## Local quality workflow
+
+The repository uses `pre-commit` for local hook orchestration and shared quality checks.
+
+Required local tools:
+
+- `pre-commit`
+- Node.js + npm
+- Rust toolchain with `clippy` and `rustfmt`
+- `cargo-audit`
+
+Install the local workflow:
+
+```bash
+npm --prefix desktop install
+cargo install cargo-audit
+pipx install pre-commit
+make hooks-install
+```
+
+Run the checks manually:
+
+```bash
+make lint
+make security
+make check
+make hooks-run
+```
+
+Hook behavior:
+
+- `pre-commit`: file hygiene, YAML/JSON/TOML validation, secret detection, shell checks, frontend lint, Rust formatting, and Rust clippy
+- `pre-push`: `make test`, `npm --prefix desktop run build`, and `cargo test --manifest-path desktop/src-tauri/Cargo.toml`
+
 The app creates or opens a local workspace, lists blocks and resume definitions, and attempts to render a real PDF into the workspace `renders/` directory.
 
 ## Legacy LaTeX Engine

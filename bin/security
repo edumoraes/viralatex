@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+fail() {
+  printf 'FAIL: %s\n' "$1" >&2
+  exit 1
+}
+
+run() {
+  printf '==> %s\n' "$*"
+  "$@"
+}
+
+command -v pre-commit >/dev/null 2>&1 || fail "pre-commit is required for secret scanning; install it first."
+command -v cargo >/dev/null 2>&1 || fail "cargo is required for Rust dependency auditing."
+cargo audit --version >/dev/null 2>&1 || fail "cargo-audit is required; install it with 'cargo install cargo-audit'."
+
+run pre-commit run detect-secrets --all-files
+run npm --prefix desktop audit --omit=dev --audit-level=high
+run cargo audit --manifest-path desktop/src-tauri/Cargo.toml
+
+printf 'Security checks passed.\n'

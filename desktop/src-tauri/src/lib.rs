@@ -9,7 +9,10 @@ use std::path::PathBuf;
 use tauri::State;
 
 #[tauri::command(rename_all = "camelCase")]
-fn create_sample_workspace(path: String, state: State<'_, AppState>) -> Result<WorkspaceSummary, String> {
+fn create_sample_workspace(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<WorkspaceSummary, String> {
     let root = PathBuf::from(path);
     workspace::create_sample_workspace(&root)?;
 
@@ -84,7 +87,10 @@ fn render_resume(resume_id: String, state: State<'_, AppState>) -> Result<Render
 }
 
 #[tauri::command(rename_all = "camelCase")]
-fn get_render_status(job_id: String, state: State<'_, AppState>) -> Result<Option<RenderResult>, String> {
+fn get_render_status(
+    job_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<RenderResult>, String> {
     let guard = state
         .render_history
         .lock()

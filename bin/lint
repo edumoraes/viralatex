@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+fail() {
+  printf 'FAIL: %s\n' "$1" >&2
+  exit 1
+}
+
+run() {
+  printf '==> %s\n' "$*"
+  "$@"
+}
+
+[[ -d "desktop/node_modules" ]] || fail "desktop dependencies are missing; run 'npm --prefix desktop install'."
+
+run npm --prefix desktop run lint
+run cargo fmt --manifest-path desktop/src-tauri/Cargo.toml --all -- --check
+run cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
+
+printf 'Lint checks passed.\n'

@@ -16,7 +16,11 @@ pub fn render_resume(
     let renders_root = workspace_root.join("renders");
 
     if let Err(error) = fs::create_dir_all(&renders_root) {
-        return failed_result(job_id, resume.id.clone(), format!("Failed to create renders directory: {error}"));
+        return failed_result(
+            job_id,
+            resume.id.clone(),
+            format!("Failed to create renders directory: {error}"),
+        );
     }
 
     let tectonic_path = match resolve_tectonic_path() {
@@ -27,7 +31,11 @@ pub fn render_resume(
     let temp_root = match tempdir() {
         Ok(directory) => directory,
         Err(error) => {
-            return failed_result(job_id, resume.id.clone(), format!("Failed to create temporary render directory: {error}"))
+            return failed_result(
+                job_id,
+                resume.id.clone(),
+                format!("Failed to create temporary render directory: {error}"),
+            )
         }
     };
 
@@ -51,7 +59,8 @@ pub fn render_resume(
         );
     }
 
-    if let Err(error) = write_profile_tex(render_root, profile, &resume.language, &resume.role_key) {
+    if let Err(error) = write_profile_tex(render_root, profile, &resume.language, &resume.role_key)
+    {
         return failed_result(job_id, resume.id.clone(), error);
     }
 
@@ -65,7 +74,11 @@ pub fn render_resume(
 
     let output_dir = renders_root.join(&resume.id);
     if let Err(error) = fs::create_dir_all(&output_dir) {
-        return failed_result(job_id, resume.id.clone(), format!("Failed to create output directory: {error}"));
+        return failed_result(
+            job_id,
+            resume.id.clone(),
+            format!("Failed to create output directory: {error}"),
+        );
     }
 
     let command = Command::new(tectonic_path)
@@ -119,7 +132,10 @@ pub fn render_resume(
         return failed_result(
             job_id,
             resume.id.clone(),
-            format!("Tectonic finished without producing a PDF at {}", pdf_path.display()),
+            format!(
+                "Tectonic finished without producing a PDF at {}",
+                pdf_path.display()
+            ),
         );
     }
 
@@ -147,7 +163,12 @@ fn materialize_template(render_root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn write_profile_tex(render_root: &Path, profile: &Profile, language: &str, role_key: &str) -> Result<(), String> {
+fn write_profile_tex(
+    render_root: &Path,
+    profile: &Profile,
+    language: &str,
+    role_key: &str,
+) -> Result<(), String> {
     let role = if language == "pt" || role_key == "pt" {
         &profile.roles.pt
     } else {
@@ -196,28 +217,54 @@ fn write_section_files(render_root: &Path, language: &str, blocks: &[Block]) -> 
     fs::create_dir_all(&section_dir)
         .map_err(|error| format!("Failed to create language section directory: {error}"))?;
 
-    fs::write(section_dir.join("summary_generated.tex"), render_summaries(blocks))
-        .map_err(|error| format!("Failed to write summary section: {error}"))?;
+    fs::write(
+        section_dir.join("summary_generated.tex"),
+        render_summaries(blocks),
+    )
+    .map_err(|error| format!("Failed to write summary section: {error}"))?;
     fs::write(
         section_dir.join("experience_generated.tex"),
         render_experiences(blocks),
     )
     .map_err(|error| format!("Failed to write experience section: {error}"))?;
-    fs::write(section_dir.join("projects_generated.tex"), render_projects(blocks))
-        .map_err(|error| format!("Failed to write projects section: {error}"))?;
-    fs::write(section_dir.join("skills_generated.tex"), render_skills(blocks))
-        .map_err(|error| format!("Failed to write skills section: {error}"))?;
-    fs::write(section_dir.join("education_generated.tex"), render_education(blocks))
-        .map_err(|error| format!("Failed to write education section: {error}"))?;
+    fs::write(
+        section_dir.join("projects_generated.tex"),
+        render_projects(blocks),
+    )
+    .map_err(|error| format!("Failed to write projects section: {error}"))?;
+    fs::write(
+        section_dir.join("skills_generated.tex"),
+        render_skills(blocks),
+    )
+    .map_err(|error| format!("Failed to write skills section: {error}"))?;
+    fs::write(
+        section_dir.join("education_generated.tex"),
+        render_education(blocks),
+    )
+    .map_err(|error| format!("Failed to write education section: {error}"))?;
 
     Ok(())
 }
 
 fn write_entrypoint(render_root: &Path, language: &str) -> Result<(), String> {
     let headings = if language == "pt" {
-        ("Resumo", "Experiência", "Projetos", "Competências", "Formação", "\\ProfileRolePT")
+        (
+            "Resumo",
+            "Experiência",
+            "Projetos",
+            "Competências",
+            "Formação",
+            "\\ProfileRolePT",
+        )
     } else {
-        ("Summary", "Experience", "Projects", "Skills", "Education", "\\ProfileRoleEN")
+        (
+            "Summary",
+            "Experience",
+            "Projects",
+            "Skills",
+            "Education",
+            "\\ProfileRoleEN",
+        )
     };
 
     let resume_tex = format!(
@@ -245,7 +292,17 @@ fn write_entrypoint(render_root: &Path, language: &str) -> Result<(), String> {
 \\input{{{}/education_generated.tex}}\n\
 \n\
 \\end{{document}}\n",
-        headings.5, headings.0, language, headings.1, language, headings.2, language, headings.3, language, headings.4, language
+        headings.5,
+        headings.0,
+        language,
+        headings.1,
+        language,
+        headings.2,
+        language,
+        headings.3,
+        language,
+        headings.4,
+        language
     );
 
     fs::write(render_root.join("resume.tex"), resume_tex)
@@ -256,7 +313,12 @@ fn render_summaries(blocks: &[Block]) -> String {
     blocks
         .iter()
         .filter(|block| block.block_type == "summary")
-        .map(|block| format!("\\summaryblock{{{}}}\n", escape_tex(block.content.as_deref().unwrap_or_default())))
+        .map(|block| {
+            format!(
+                "\\summaryblock{{{}}}\n",
+                escape_tex(block.content.as_deref().unwrap_or_default())
+            )
+        })
         .collect::<Vec<String>>()
         .join("\n")
 }

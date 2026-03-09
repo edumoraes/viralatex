@@ -67,7 +67,10 @@ pub fn load_blocks(root: &Path) -> Result<Vec<Block>, String> {
     let mut blocks = Vec::new();
     let blocks_root = root.join("blocks");
 
-    for entry in WalkDir::new(&blocks_root).into_iter().filter_map(Result::ok) {
+    for entry in WalkDir::new(&blocks_root)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
         let path = entry.path();
         if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("yml") {
             continue;
@@ -88,7 +91,10 @@ pub fn load_resumes(root: &Path) -> Result<Vec<ResumeDefinition>, String> {
     let mut resumes = Vec::new();
     let resumes_root = root.join("resumes");
 
-    for entry in WalkDir::new(&resumes_root).into_iter().filter_map(Result::ok) {
+    for entry in WalkDir::new(&resumes_root)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
         let path = entry.path();
         if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("yml") {
             continue;
@@ -134,14 +140,16 @@ fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {
         let target = destination.join(relative);
 
         if entry.file_type().is_dir() {
-            fs::create_dir_all(&target)
-                .map_err(|error| format!("Failed to create directory {}: {error}", target.display()))?;
+            fs::create_dir_all(&target).map_err(|error| {
+                format!("Failed to create directory {}: {error}", target.display())
+            })?;
             continue;
         }
 
         if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("Failed to create directory {}: {error}", parent.display()))?;
+            fs::create_dir_all(parent).map_err(|error| {
+                format!("Failed to create directory {}: {error}", parent.display())
+            })?;
         }
 
         fs::copy(path, &target).map_err(|error| {

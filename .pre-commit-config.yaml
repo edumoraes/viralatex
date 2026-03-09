@@ -1,0 +1,63 @@
+default_install_hook_types:
+  - pre-commit
+  - pre-push
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      - id: detect-private-key
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args:
+          - --exclude-files
+          - ^(desktop/package-lock\.json|desktop/src-tauri/Cargo\.lock)$
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        files: ^bin/
+
+  - repo: local
+    hooks:
+      - id: desktop-eslint
+        name: desktop eslint
+        entry: npm --prefix desktop run lint
+        language: system
+        files: ^desktop/(src/.*\.(ts|tsx)|eslint\.config\.js|package(-lock)?\.json|tsconfig.*\.json|vite\.config\.ts)$
+        pass_filenames: false
+
+      - id: tauri-fmt
+        name: tauri cargo fmt
+        entry: cargo fmt --manifest-path desktop/src-tauri/Cargo.toml --all -- --check
+        language: system
+        files: ^desktop/src-tauri/.*\.rs$
+        pass_filenames: false
+
+      - id: tauri-clippy
+        name: tauri cargo clippy
+        entry: cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
+        language: system
+        files: ^desktop/src-tauri/.*\.rs$
+        pass_filenames: false
+
+      - id: pre-push-check
+        name: pre-push repo checks
+        entry: bin/pre-push-check
+        language: system
+        pass_filenames: false
+        stages:
+          - pre-push

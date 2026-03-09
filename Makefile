@@ -5,7 +5,7 @@ FILE ?=
 TEXINPUTS_VALUE = /workspace/src/template//:/workspace/src/shared//:/workspace/src/shared/sections//:
 LATEXMK_FLAGS = $(LATEXMK_ENGINE) -interaction=nonstopmode -halt-on-error -output-directory=out
 
-.PHONY: image build build-all build-pt build-en test clean shell
+.PHONY: image build build-all build-pt build-en test lint security check hooks-install hooks-run clean shell
 
 image:
 	docker build -t $(IMAGE_NAME) .
@@ -52,6 +52,21 @@ build-all:
 
 test:
 	bin/test
+
+lint:
+	bin/lint
+
+security:
+	bin/security
+
+check:
+	bin/check
+
+hooks-install:
+	bin/install-hooks
+
+hooks-run:
+	bin/run-hooks
 
 clean:
 	rm -rf out
