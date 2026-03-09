@@ -34,7 +34,11 @@ assert_glob_count() {
   local expected_min="$1"
   local glob_pattern="$2"
   shopt -s nullglob
-  local matches=( $glob_pattern )
+  local matches=()
+  local path
+  for path in $glob_pattern; do
+    matches+=( "$path" )
+  done
   shopt -u nullglob
   (( ${#matches[@]} >= expected_min )) || fail "expected at least $expected_min matches for $glob_pattern"
 }
