@@ -21,6 +21,6 @@ cargo audit --version >/dev/null 2>&1 || fail "cargo-audit is required; install 
 
 run pre-commit run detect-secrets --all-files
 run npm --prefix desktop audit --omit=dev --audit-level=high
-run cargo audit --manifest-path desktop/src-tauri/Cargo.toml
+run cargo audit --file desktop/src-tauri/Cargo.lock
 
 printf 'Security checks passed.\n'
