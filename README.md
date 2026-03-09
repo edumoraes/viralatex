@@ -1,8 +1,64 @@
-# Currículo em LaTeX
+# Resume Studio Bootstrap
 
-Projeto LaTeX para manter múltiplas versões do currículo com base compartilhada, suporte bilíngue e compilação via Docker.
+This repository now contains two complementary layers:
 
-O build configura `TEXINPUTS` automaticamente para que classes e seções compartilhadas sejam resolvidas sem depender de caminhos relativos frágeis. A compilação usa LuaLaTeX por padrão para preservar texto Unicode e glifos de pt-BR no PDF final.
+- the original LaTeX engine in `src/`, still useful as a reference and template base
+- the bootstrap of the new local-first desktop application in `desktop/`
+
+The immediate goal is to validate the product foundation with `Tauri + Rust + React + TypeScript`, using a filesystem-backed workspace and real local rendering through `tectonic`.
+
+## Desktop Bootstrap
+
+The desktop app lives in `desktop/` and assumes:
+
+- `filesystem` as the canonical source of user data
+- `SQLite` only as a future operational and indexing layer
+- `tectonic` as the local PDF rendering engine
+- a sample workspace in `examples/sample-workspace/`
+
+### New structure
+
+```text
+desktop/
+  src/
+  src-tauri/
+examples/
+  sample-workspace/
+src/
+  template/
+  shared/
+  versions/
+```
+
+### Bootstrap requirements
+
+- Node.js + npm
+- Rust toolchain
+- bundled `tectonic` binary in `desktop/src-tauri/binaries/tectonic`, or a custom path via `TECTONIC_BIN`
+
+### Bootstrap commands
+
+```bash
+cd desktop
+npm install
+npm run tauri:dev
+```
+
+To use a specific `tectonic` binary:
+
+```bash
+TECTONIC_BIN=/path/to/tectonic npm run tauri:dev
+```
+
+The bootstrap already supports a bundled local binary at `desktop/src-tauri/binaries/tectonic`, which is the preferred model for future app distribution.
+
+The app creates or opens a local workspace, lists blocks and resume definitions, and attempts to render a real PDF into the workspace `renders/` directory.
+
+## Legacy LaTeX Engine
+
+LaTeX project for maintaining multiple resume variants with a shared base, bilingual support, and Docker-based compilation.
+
+The build configures `TEXINPUTS` automatically so shared classes and sections can be resolved without fragile relative paths. Compilation still uses LuaLaTeX by default to preserve Unicode text and pt-BR glyphs in the final PDF.
 
 ## Estrutura
 

@@ -1,0 +1,11 @@
+id: trocados-dev-en
+blockType: experience
+language: en
+section: experience
+title: Trocados
+subtitle: Web Development Intern
+dateRange: Mar 2023 -- Sep 2023
+items:
+  - Built web solutions using Node.js, JavaScript, TypeScript, Angular, MySQL, and PHP across frontend and backend layers.
+  - Partnered with product and design to translate business requirements into shippable implementations.
+  - Built practical experience in software maintenance, layered integrations, and agile delivery cadence.

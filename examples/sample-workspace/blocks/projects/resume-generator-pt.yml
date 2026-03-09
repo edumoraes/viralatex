@@ -1,0 +1,8 @@
+id: resume-generator-pt
+blockType: project
+language: pt
+section: project
+title: Sistema Bilíngue de Geração de Currículos em LaTeX
+dateRange: 2026
+content: Projetei e implementei uma base reutilizável em LaTeX com variantes por idioma, seções compartilhadas, pipeline de build em Docker e verificações automatizadas.
+items: []

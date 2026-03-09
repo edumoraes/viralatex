@@ -1,0 +1,22 @@
+[package]
+name = "resume-studio-desktop"
+version = "0.1.0"
+description = "Local-first resume desktop bootstrap"
+authors = ["Eduardo de Moraes"]
+edition = "2021"
+
+[lib]
+name = "resume_studio_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0.2", features = [] }
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+tauri = { version = "2.3.1", features = [] }
+tempfile = "3.17"
+walkdir = "2.5"
+which = "8.0"

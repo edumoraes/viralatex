@@ -1,0 +1,10 @@
+id: base-en
+title: Base Resume EN
+language: en
+roleKey: en
+blockIds:
+  - summary-en
+  - trocados-dev-en
+  - resume-generator-en
+  - backend-en
+  - ufam-en
