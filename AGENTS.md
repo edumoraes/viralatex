@@ -55,7 +55,7 @@ LaTeX libraries loaded in `src/template/resume.cls`:
 - `microtype`: text spacing and typographic refinement.
 - `xcolor`: named color palette for text and rules.
 
-Verified package versions installed in the current local build of `curriculo-latex:latest` (`sha256:80847c801f045d2077830cb7bcf5a32bef961887311ac6f99c7b78c99d22894b`, created on 2026-03-09):
+Verified package versions installed in the current local build of `viralatex-latex:latest` (`sha256:80847c801f045d2077830cb7bcf5a32bef961887311ac6f99c7b78c99d22894b`, created on 2026-03-09):
 
 - `latexmk` `1:4.79-1`: orchestrates incremental LaTeX builds.
 - `texlive-latex-base` `2022.20230122-3`: core LaTeX packages and base tooling.
@@ -67,7 +67,7 @@ Verified package versions installed in the current local build of `curriculo-lat
 These versions come from the built image, not from fully pinned package declarations in `Dockerfile`. Rebuilding later may change them if the Debian package index changes.
 
 ## Build, Test, and Development Commands
-- `make image`: builds the Docker image `curriculo-latex`.
+- `make image`: builds the Docker image `viralatex-latex`.
 - `make build`: builds all variants, or one file with `make build FILE=src/versions/pt/base.tex`.
 - `make build-pt`: builds all Portuguese variants.
 - `make build-en`: builds all English variants.

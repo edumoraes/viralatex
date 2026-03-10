@@ -113,7 +113,7 @@ pass "build targets expand successfully"
 
 if [[ "${RUN_DOCKER_SMOKE_TEST:-0}" == "1" ]]; then
   command -v docker >/dev/null 2>&1 || fail "docker not found for smoke test"
-  docker image inspect "${IMAGE_NAME:-curriculo-latex}" >/dev/null 2>&1 || fail "docker image '${IMAGE_NAME:-curriculo-latex}' not found; run 'make image' first"
+  docker image inspect "${IMAGE_NAME:-viralatex-latex}" >/dev/null 2>&1 || fail "docker image '${IMAGE_NAME:-viralatex-latex}' not found; run 'make image' first"
   make build-all
   pass "docker smoke build completed"
 else

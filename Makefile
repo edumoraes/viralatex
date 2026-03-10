@@ -1,4 +1,4 @@
-IMAGE_NAME ?= curriculo-latex
+IMAGE_NAME ?= viralatex-latex
 LATEXMK ?= latexmk
 LATEXMK_ENGINE ?= -lualatex
 FILE ?=
