@@ -367,6 +367,16 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn env_value(command: &Command, key: &str) -> Option<String> {
+        command.get_envs().find_map(|(name, value)| {
+            if name == key {
+                value.map(|entry| entry.to_string_lossy().to_string())
+            } else {
+                None
+            }
+        })
+    }
+
     #[test]
     fn stored_config_roundtrips_and_masks_api_key() {
         let temp = tempdir().expect("tempdir should exist");
@@ -415,6 +425,36 @@ mod tests {
     }
 
     #[test]
+    fn normalize_config_accepts_stub_without_api_key() {
+        let config = normalize_config(
+            AiProviderConfigInput {
+                provider: STUB_PROVIDER.to_string(),
+                api_key: None,
+            },
+            None,
+        )
+        .expect("stub config should be valid");
+
+        assert_eq!(config.provider, STUB_PROVIDER);
+        assert_eq!(config.api_key, None);
+    }
+
+    #[test]
+    fn normalize_config_rejects_unsupported_provider() {
+        let error = normalize_config(
+            AiProviderConfigInput {
+                provider: "bedrock".to_string(),
+                api_key: None,
+            },
+            None,
+        )
+        .expect_err("unsupported provider should fail");
+
+        assert!(error.contains("Unsupported AI provider"));
+        assert!(error.contains("bedrock"));
+    }
+
+    #[test]
     fn default_model_matches_each_provider() {
         assert_eq!(
             default_model_for_provider(OPENAI_PROVIDER),
@@ -446,5 +486,58 @@ mod tests {
         .expect("existing key should be reused");
 
         assert_eq!(config.api_key.as_deref(), Some("secret"));
+    }
+
+    #[test]
+    fn apply_provider_env_sets_openai_model_and_key_only() {
+        let mut command = Command::new("python3");
+        command.env("ANTHROPIC_API_KEY", "stale-anthropic");
+        command.env("OLLAMA_MODEL", "stale-ollama");
+
+        apply_provider_env(
+            &mut command,
+            &StoredAiProviderConfig {
+                provider: OPENAI_PROVIDER.to_string(),
+                api_key: Some("secret".to_string()),
+            },
+        );
+
+        assert_eq!(
+            env_value(&command, "RESUME_STUDIO_AI_MODEL").as_deref(),
+            Some(DEFAULT_OPENAI_MODEL)
+        );
+        assert_eq!(
+            env_value(&command, "OPENAI_API_KEY").as_deref(),
+            Some("secret")
+        );
+        assert_eq!(env_value(&command, "ANTHROPIC_API_KEY"), None);
+        assert_eq!(env_value(&command, "OLLAMA_MODEL"), None);
+        assert_eq!(env_value(&command, "OLLAMA_BASE_URL"), None);
+    }
+
+    #[test]
+    fn apply_provider_env_clears_stale_remote_provider_keys() {
+        let mut command = Command::new("python3");
+        command.env("OPENAI_API_KEY", "stale-openai");
+        command.env("ANTHROPIC_API_KEY", "stale-anthropic");
+        command.env("OLLAMA_BASE_URL", "http://localhost:11434");
+        command.env("OLLAMA_MODEL", "llama3.2");
+
+        apply_provider_env(
+            &mut command,
+            &StoredAiProviderConfig {
+                provider: STUB_PROVIDER.to_string(),
+                api_key: None,
+            },
+        );
+
+        assert_eq!(
+            env_value(&command, "RESUME_STUDIO_AI_MODEL").as_deref(),
+            Some(STUB_PROVIDER)
+        );
+        assert_eq!(env_value(&command, "OPENAI_API_KEY"), None);
+        assert_eq!(env_value(&command, "ANTHROPIC_API_KEY"), None);
+        assert_eq!(env_value(&command, "OLLAMA_BASE_URL"), None);
+        assert_eq!(env_value(&command, "OLLAMA_MODEL"), None);
     }
 }
