@@ -1,11 +1,12 @@
 # Resume Studio Desktop Architecture
 
 ## Summary
-This repository currently implements a local-first desktop workspace editor for resume management and rendering. The architecture combines four active layers:
+This repository currently implements a local-first desktop workspace editor for resume management and rendering. The architecture combines five active layers:
 
 - legacy LaTeX presentation assets in `src/`
 - a React and TypeScript desktop frontend in `desktop/src/`
 - a Rust and Tauri backend in `desktop/src-tauri/src/`
+- a Python AI sidecar in `desktop/ai_service/`
 - a filesystem-backed sample workspace in `examples/sample-workspace/`
 
 The repository is not a web application and does not currently use Rails, Postgres, background jobs, or server-side persistence. The active architecture is a desktop client that reads and writes structured files from disk, persists minimal operational state inside the workspace, and renders PDFs locally.
@@ -27,6 +28,7 @@ The repository is not a web application and does not currently use Rails, Postgr
 - React UI
 - Tauri command surface
 - Rust workspace loader and renderer
+- Python AI sidecar with DeepAgents and LangGraph persistence
 - LaTeX template assets
 - repository quality tooling
 
@@ -42,9 +44,16 @@ The frontend lives in `desktop/src/` and is built with React, TypeScript, and Vi
 - archiving blocks and resumes locally
 - triggering resume rendering and showing the result
 - showing persisted render history
-- calling a task-oriented LLM stub boundary
+- calling a persistent LangGraph-compatible AI sidecar
 
 The frontend does not own persistence. It is a thin orchestration layer over Tauri commands.
+
+The chat surface now:
+
+- uses `@langchain/langgraph-sdk/react` instead of the previous stateless chat helper
+- persists the current `threadId` in `localStorage`
+- hydrates prior thread state from `/threads/:id/state`
+- renders approval controls when the sidecar returns interrupt actions
 
 ### 2. Tauri command layer
 The command layer lives primarily in `desktop/src-tauri/src/lib.rs`. It exposes the desktop capabilities to the frontend through Tauri commands:
@@ -62,9 +71,17 @@ The command layer lives primarily in `desktop/src-tauri/src/lib.rs`. It exposes 
 - `archive_resume`
 - `save_app_workspace_state`
 - `render_resume`
+- `ensure_ai_service_started`
 - `run_llm_task`
 
 This layer keeps only the selected workspace in memory. Operational state and render history are persisted in the workspace itself.
+
+It also owns sidecar orchestration:
+
+- resolves a Python interpreter, preferring `desktop/ai_service/.venv/bin/python`
+- allocates an app-local sidecar data directory
+- starts the Python sidecar process
+- polls `/health` before exposing the chat surface to the frontend
 
 ### 3. Rust domain and file services
 The Rust backend loads and validates the workspace using modules in `desktop/src-tauri/src/`:
@@ -73,11 +90,30 @@ The Rust backend loads and validates the workspace using modules in `desktop/src
 - `domain.rs`: serializable data structures shared across the app boundary
 - `renderer.rs`: local render orchestration and artifact generation
 - `app_state.rs`: selected workspace
-- `llm.rs`: task-oriented local stub for the future LLM boundary
+- `ai_service.rs`: sidecar process lifecycle and health probing
+- `llm.rs`: task-oriented local stub for the older non-agent boundary
 
 This layer treats YAML files in the workspace as the source of truth.
 
-### 4. LaTeX rendering assets
+### 4. Python AI sidecar
+The AI sidecar lives in `desktop/ai_service/` and provides the local agent runtime used by the desktop chat.
+
+Key responsibilities:
+
+- expose `/health`, `/stream`, and `/threads/:id/state` over a loopback HTTP server
+- select a model from local environment configuration
+- run a `deepagents` agent with a `SqliteSaver` checkpointer when a real provider is configured
+- constrain filesystem access to workspace content directories and an app-local `/memories/AGENTS.md`
+- interrupt file edits so the frontend can approve, edit, or reject proposed mutations
+- fall back to a local stub runtime when no provider is configured while preserving the same thread and interrupt contract
+
+The agent is intentionally scoped:
+
+- workspace writes are limited to `/profile`, `/blocks`, and `/resumes`
+- non-workspace project files, templates, and build files are outside the intended mutation boundary
+- long-term memory is isolated in `/memories/AGENTS.md`
+
+### 5. LaTeX rendering assets
 The rendering foundation still comes from the maintained LaTeX assets:
 
 - `src/template/resume.cls`
@@ -124,6 +160,15 @@ The workspace model is intentionally file-based:
 3. Archive actions move files into `_archived` folders instead of deleting them.
 4. The frontend reloads the workspace snapshot.
 
+### Agent-assisted workspace edit
+1. The frontend submits prompt input and workspace context to the sidecar `/stream` endpoint.
+2. The sidecar runs either the stub runtime or a DeepAgents graph bound to the current `thread_id`.
+3. If the graph proposes a file mutation, the sidecar returns an interrupt inside the streamed `values`.
+4. The frontend renders an approval UI with the target path and editable proposed content.
+5. The user chooses approve, approve edited, or reject.
+6. The frontend sends the decision back as a LangGraph resume command.
+7. The sidecar applies or discards the pending mutation and persists the updated thread state.
+
 ### Render resume
 1. The frontend sends a `resumeId` to `render_resume`.
 2. Rust loads the selected workspace, profile, blocks, and resume definitions.
@@ -163,6 +208,12 @@ Workspace-local operational persistence lives on disk:
 - `.app/state.yml`: last selected resume and other minimal app state
 - `.app/render-history.yml`: persisted render history by job
 
+Sidecar-local operational persistence also lives on disk outside the workspace:
+
+- app-local `ai-service/threads.sqlite`: provider-backed LangGraph checkpoints
+- app-local `ai-service/memories/AGENTS.md`: long-term memory file exposed to the agent
+- app-local `ai-service/threads/*.json`: stub runtime thread state used in development fallback mode
+
 There is still no persistent application database.
 
 ## Interface Contracts
@@ -173,6 +224,7 @@ The boundary between React and Rust is the Tauri invoke contract. The commands r
 - `Block`
 - `ResumeDefinition`
 - `RenderResult`
+- `AiServiceStatus`
 
 These types are defined in Rust and mirrored structurally in the frontend TypeScript code.
 
@@ -186,6 +238,13 @@ The backend expects stable workspace conventions:
 
 If those assumptions fail, the backend returns user-visible errors rather than trying to recover silently.
 
+### Frontend to sidecar
+The React chat surface talks to the sidecar using LangGraph-compatible HTTP contracts:
+
+- `GET /health`: provider, model, and health status
+- `POST /stream`: streamed `values` events and interrupt-bearing thread updates
+- `GET /threads/:id/state`: current serialized thread values for hydration and restart recovery
+
 ## Build and Quality Architecture
 Repository quality is enforced through layered local commands:
 
@@ -193,10 +252,22 @@ Repository quality is enforced through layered local commands:
 - `make lint`: frontend ESLint, Rust `fmt`, and Rust `clippy`
 - `make security`: secret scanning plus `npm audit` and `cargo audit`
 - `bin/pre-push-check`: baseline push gate with `make test`, desktop build, and Rust tests
+- `python3 -m unittest discover -s desktop/ai_service/tests -p 'test_*.py'`: sidecar regression tests
+- `npm --prefix desktop run test`: frontend regression tests for the chat shell and orchestration
 
 Git hook orchestration is handled by `pre-commit` with both `pre-commit` and `pre-push` stages enabled. This keeps quality checks close to local development instead of relying only on manual discipline.
 
 ## Key Tradeoffs
+### Filesystem-backed agent tools
+The current product exposes the workspace to the agent through a filesystem backend because:
+
+- the workspace is already the canonical data model
+- proposed edits remain inspectable before approval
+- the same boundaries work for both stub and provider-backed runtimes
+
+Tradeoff:
+- tool safety depends on careful backend routing and prompt constraints rather than stronger typed command APIs
+
 ### Filesystem over database
 The current product chooses local files over a DB because:
 
@@ -227,7 +298,8 @@ Tradeoff:
 - the renderer must adapt to legacy template constraints
 
 ## Current Limitations
-- no real provider-backed AI integration yet
+- provider-backed agent quality depends on local model and credential configuration
+- the stub runtime only simulates a narrow interrupt flow for development and tests
 - no persistent DB for indexing or search
 - no cloud sync
 - no background job system beyond local command execution

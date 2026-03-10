@@ -3,7 +3,7 @@
 This repository now contains two complementary layers:
 
 - the original LaTeX engine in `src/`, still useful as a reference and template base
-- the bootstrap of the new local-first desktop application in `desktop/`
+- the local-first desktop application in `desktop/`, including a Python AI sidecar backed by DeepAgents
 
 The immediate goal is to validate the product foundation with `Tauri + Rust + React + TypeScript`, using a manifest-versioned local workspace, form-based local CRUD, workspace-local operational persistence, and real local rendering through `tectonic`.
 
@@ -16,7 +16,26 @@ The desktop app lives in `desktop/` and assumes:
 - workspace-local operational state in `.app/`
 - `SQLite` only as a future operational and indexing layer
 - `tectonic` as the local PDF rendering engine
+- a local Python AI sidecar for prompt-driven workspace assistance
 - a sample workspace in `examples/sample-workspace/`
+
+### AI sidecar runtime
+
+The desktop app now starts a local AI sidecar that exposes a LangGraph-compatible stream endpoint for the chat panel.
+
+- `desktop/ai_service/server.py`: Python HTTP sidecar exposing `/health`, `/stream`, and `/threads/:id/state`
+- `deepagents`: agent runtime used when `RESUME_STUDIO_AI_MODEL` resolves to a provider-backed model
+- `langgraph-checkpoint-sqlite`: thread checkpoint persistence for sidecar conversation state
+- `desktop/src-tauri/src/ai_service.rs`: Tauri launcher that starts the sidecar and assigns an app-local data directory
+- `desktop/src/App.tsx`: React chat client using `@langchain/langgraph-sdk/react`
+
+Runtime behavior:
+
+- the sidecar chooses its model from `RESUME_STUDIO_AI_MODEL`, `OPENAI_API_KEY`, or Ollama-related environment variables
+- provider-backed runs use DeepAgents with filesystem-scoped access to `/profile`, `/blocks`, `/resumes`, and `/memories/AGENTS.md`
+- write operations are interrupt-driven and require explicit approval from the desktop UI before the workspace is mutated
+- thread state is persisted locally and can be reloaded after restarting the sidecar
+- when no provider is configured, the sidecar falls back to a local stub runtime that preserves the same thread and approval shape for development
 
 ### Workspace contract
 
@@ -61,6 +80,8 @@ src/
 
 - Node.js + npm
 - Rust toolchain
+- Python 3.12+
+- `uv` for sidecar dependency sync
 - managed `tectonic` binary in `desktop/src-tauri/binaries/tectonic`, or a custom path via `TECTONIC_BIN`
 
 ### Bootstrap commands
@@ -70,6 +91,14 @@ cd desktop
 npm install
 npm run tauri:dev
 ```
+
+Set up the AI sidecar environment before using the desktop chat or running sidecar tests:
+
+```bash
+uv sync --directory desktop/ai_service
+```
+
+The Tauri backend prefers `desktop/ai_service/.venv/bin/python` and falls back to `python3` or `python` from `PATH` only when the managed virtualenv is absent.
 
 Before rendering resumes, install or register a local `tectonic` binary for the desktop app:
 
@@ -107,6 +136,17 @@ The managed local binary at `desktop/src-tauri/binaries/tectonic` is the preferr
 
 Both `npm --prefix desktop run tauri:dev` and `npm --prefix desktop run tauri:build` now fail early with an actionable message if `tectonic` is unavailable.
 
+### AI chat workflow
+
+The desktop chat now uses a persistent thread model instead of the previous stateless message streaming.
+
+1. The frontend starts the sidecar through Tauri and receives `baseUrl`, `provider`, and `model`.
+2. The chat panel opens a LangGraph stream against `/stream` and keeps a local `threadId` in `localStorage`.
+3. The sidecar returns `values` events containing serialized messages and optional `__interrupt__` actions.
+4. If the agent proposes a workspace edit, the UI shows the target path and proposed content for approval, edit-and-approve, or rejection.
+5. The selected decision is sent back as a resume command so the sidecar can continue or discard the pending mutation.
+6. The current thread state can be rehydrated from `/threads/:id/state` after restarting the app or sidecar.
+
 ## Local quality workflow
 
 The repository uses `pre-commit` for local hook orchestration and shared quality checks.
@@ -117,6 +157,8 @@ Required local tools:
 - Node.js + npm
 - Rust toolchain with `clippy` and `rustfmt`
 - `cargo-audit`
+- Python 3.12+
+- `uv`
 
 Install the local workflow:
 
@@ -124,6 +166,7 @@ Install the local workflow:
 npm --prefix desktop install
 cargo install cargo-audit
 pipx install pre-commit
+uv sync --directory desktop/ai_service
 make tectonic-setup TECTONIC_BIN=/path/to/tectonic
 make hooks-install
 ```
