@@ -1,35 +1,30 @@
-#!/usr/bin/env python3
-
-from __future__ import annotations
-
-from sidecar import (
-    AiService,
-    DeepAgentRuntime,
+from .config import (
     DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OPENAI_MODEL,
     HOST,
     MANAGED_TECTONIC_PATH,
     PORT,
-    ResumeStudioHandler,
     SUPPORTED_MODELS,
-    StubRuntime,
     choose_model,
     choose_provider,
+    managed_tectonic_path,
+    provider_from_model,
+)
+from .http_api import ResumeStudioHandler
+from .runtimes import DeepAgentRuntime, StubRuntime, workspace_backend_routes
+from .service import AiService
+from .template_compiler import (
     compile_latex_template,
     compile_workspace_template,
     failed_compile_result,
     load_yaml,
-    managed_tectonic_path,
-    provider_from_model,
     resolve_template_entrypoint,
     resolve_template_manifest,
     resolve_template_root,
     resolve_tectonic_path,
-    workspace_backend_routes,
     write_yaml,
 )
-from sidecar.app import main
 
 __all__ = [
     "AiService",
@@ -49,7 +44,6 @@ __all__ = [
     "compile_workspace_template",
     "failed_compile_result",
     "load_yaml",
-    "main",
     "managed_tectonic_path",
     "provider_from_model",
     "resolve_template_entrypoint",
@@ -59,7 +53,3 @@ __all__ = [
     "workspace_backend_routes",
     "write_yaml",
 ]
-
-
-if __name__ == "__main__":
-    main()

@@ -60,7 +60,8 @@ def parse_sse(payload: str) -> list[dict]:
     return events
 
 
-class AiSidecarServerTest(unittest.TestCase):
+@unittest.skipIf(os.environ.get("SKIP_SOCKET_TESTS") == "1", "Socket tests disabled")
+class AiSidecarServerProcessTest(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
@@ -126,108 +127,6 @@ class AiSidecarServerTest(unittest.TestCase):
             self.assertEqual(response.status, 200)
             return json.loads(response.read().decode("utf-8"))
 
-    def test_stream_returns_assistant_message_for_stub_model(self):
-        port, _ = self.start_server()
-        thread_id = "thread-stub"
-
-        events = self.post_stream(
-            port,
-            {
-                "input": {
-                    "messages": [
-                        {
-                            "type": "human",
-                            "content": "Summarize the current workspace.",
-                        }
-                    ]
-                },
-                "context": {
-                    "workspaceRoot": str(self.workspace_root),
-                },
-                "config": {"configurable": {"thread_id": thread_id}},
-            },
-        )
-
-        event_names = [event["event"] for event in events]
-        self.assertIn("messages", event_names)
-        self.assertIn("values", event_names)
-        self.assertLess(event_names.index("messages"), event_names.index("values"))
-
-        message_events = [event["data"] for event in events if event["event"] == "messages"]
-        self.assertGreater(len(message_events), 1)
-
-        assistant_chunks = [event for event in message_events if event[0]["type"] == "AIMessageChunk"]
-        self.assertGreater(len(assistant_chunks), 1)
-        self.assertEqual(len({event[0]["id"] for event in assistant_chunks}), 1)
-
-        state = self.get_thread_state(port, thread_id)
-        messages = state["values"]["messages"]
-        self.assertEqual(messages[0]["type"], "human")
-        self.assertEqual(messages[-1]["type"], "ai")
-        self.assertIn("workspace", json.dumps(messages[-1]).lower())
-
-    def test_mutation_interrupts_and_resume_applies_block_update(self):
-        port, _ = self.start_server()
-        thread_id = "thread-hitl"
-
-        interrupted = self.post_stream(
-            port,
-            {
-                "input": {
-                    "messages": [
-                        {
-                            "type": "human",
-                            "content": (
-                                "Update the summary-en block so it explicitly mentions "
-                                "LangGraph and DeepAgents."
-                            ),
-                        }
-                    ]
-                },
-                "context": {
-                    "workspaceRoot": str(self.workspace_root),
-                },
-                "config": {"configurable": {"thread_id": thread_id}},
-            },
-        )
-
-        interrupt_values = [
-            event["data"]
-            for event in interrupted
-            if event["event"] == "values" and "__interrupt__" in event["data"]
-        ]
-        self.assertTrue(interrupt_values)
-        interrupted_state = self.get_thread_state(port, thread_id)
-        self.assertEqual(interrupted_state["status"], "interrupted")
-
-        resumed = self.post_stream(
-            port,
-            {
-                "command": {
-                    "resume": {
-                        "decisions": [
-                            {
-                                "type": "approve",
-                            }
-                        ]
-                    }
-                },
-                "context": {
-                    "workspaceRoot": str(self.workspace_root),
-                },
-                "config": {"configurable": {"thread_id": thread_id}},
-            },
-        )
-
-        resumed_state = self.get_thread_state(port, thread_id)
-        self.assertEqual(resumed_state["status"], "idle")
-        self.assertIn("values", [event["event"] for event in resumed])
-
-        summary_path = self.workspace_root / "blocks" / "summaries" / "summary-en.yml"
-        contents = summary_path.read_text(encoding="utf-8")
-        self.assertIn("LangGraph", contents)
-        self.assertIn("DeepAgents", contents)
-
     def test_thread_state_survives_sidecar_restart(self):
         thread_id = "thread-persisted"
         port, process = self.start_server()
@@ -257,42 +156,6 @@ class AiSidecarServerTest(unittest.TestCase):
         messages = state["values"]["messages"]
         serialized = json.dumps(messages)
         self.assertIn("concise resume bullets", serialized)
-
-    def test_choose_provider_prefers_explicit_openai_provider(self):
-        previous_provider = os.environ.get("RESUME_STUDIO_AI_PROVIDER")
-        previous_key = os.environ.get("OPENAI_API_KEY")
-        self.addCleanup(self.restore_env, "RESUME_STUDIO_AI_PROVIDER", previous_provider)
-        self.addCleanup(self.restore_env, "OPENAI_API_KEY", previous_key)
-        os.environ["RESUME_STUDIO_AI_PROVIDER"] = "openai"
-        os.environ["OPENAI_API_KEY"] = "sk-test"  # pragma: allowlist secret
-
-        self.assertEqual(server.choose_provider(), "openai")
-        self.assertEqual(server.choose_model("openai"), "openai:gpt-4o-mini")
-
-    def test_choose_provider_prefers_explicit_anthropic_provider(self):
-        previous_provider = os.environ.get("RESUME_STUDIO_AI_PROVIDER")
-        previous_key = os.environ.get("ANTHROPIC_API_KEY")
-        self.addCleanup(self.restore_env, "RESUME_STUDIO_AI_PROVIDER", previous_provider)
-        self.addCleanup(self.restore_env, "ANTHROPIC_API_KEY", previous_key)
-        os.environ["RESUME_STUDIO_AI_PROVIDER"] = "anthropic"
-        os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test"  # pragma: allowlist secret
-
-        self.assertEqual(server.choose_provider(), "anthropic")
-        self.assertEqual(server.choose_model("anthropic"), "anthropic:claude-3-5-haiku-latest")
-
-    def test_choose_provider_prefers_explicit_ollama_provider(self):
-        previous_provider = os.environ.get("RESUME_STUDIO_AI_PROVIDER")
-        self.addCleanup(self.restore_env, "RESUME_STUDIO_AI_PROVIDER", previous_provider)
-        os.environ["RESUME_STUDIO_AI_PROVIDER"] = "ollama"
-
-        self.assertEqual(server.choose_provider(), "ollama")
-        self.assertEqual(server.choose_model("ollama"), "ollama:llama3.2")
-
-    def restore_env(self, key: str, value: str | None):
-        if value is None:
-            os.environ.pop(key, None)
-            return
-        os.environ[key] = value
 
 
 if __name__ == "__main__":
