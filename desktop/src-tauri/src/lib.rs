@@ -1,3 +1,4 @@
+mod ai_service;
 mod app_state;
 mod domain;
 mod llm;
@@ -6,11 +7,11 @@ mod workspace;
 
 use app_state::AppState;
 use domain::{
-    AppWorkspaceState, Block, LlmTaskRequest, LlmTaskResult, Profile, RenderResult,
-    ResumeDefinition, WorkspaceSnapshot, WorkspaceSummary,
+    AiServiceStatus, AppWorkspaceState, Block, LlmTaskRequest, LlmTaskResult, Profile,
+    RenderResult, ResumeDefinition, WorkspaceSnapshot, WorkspaceSummary,
 };
 use std::path::{Path, PathBuf};
-use tauri::State;
+use tauri::{Manager, State};
 
 #[tauri::command(rename_all = "camelCase")]
 fn create_sample_workspace(
@@ -24,6 +25,18 @@ fn create_sample_workspace(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+fn create_sample_workspace_dialog(state: State<'_, AppState>) -> Result<WorkspaceSnapshot, String> {
+    let root = rfd::FileDialog::new()
+        .set_title("Choose a folder for the sample workspace")
+        .pick_folder()
+        .ok_or_else(|| "Folder selection cancelled.".to_string())?;
+
+    workspace::create_sample_workspace(&root)?;
+    set_selected_workspace(&state, &root)?;
+    workspace::load_workspace_snapshot(&root)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 fn select_workspace(path: String, state: State<'_, AppState>) -> Result<WorkspaceSnapshot, String> {
     let canonical = PathBuf::from(path)
         .canonicalize()
@@ -31,6 +44,18 @@ fn select_workspace(path: String, state: State<'_, AppState>) -> Result<Workspac
     workspace::validate_workspace(&canonical)?;
     set_selected_workspace(&state, &canonical)?;
     workspace::load_workspace_snapshot(&canonical)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn open_workspace_dialog(state: State<'_, AppState>) -> Result<WorkspaceSnapshot, String> {
+    let root = rfd::FileDialog::new()
+        .set_title("Choose a workspace directory")
+        .pick_folder()
+        .ok_or_else(|| "Folder selection cancelled.".to_string())?;
+
+    workspace::validate_workspace(&root)?;
+    set_selected_workspace(&state, &root)?;
+    workspace::load_workspace_snapshot(&root)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -133,7 +158,11 @@ fn list_render_history(state: State<'_, AppState>) -> Result<Vec<RenderResult>, 
 }
 
 #[tauri::command(rename_all = "camelCase")]
-fn render_resume(resume_id: String, state: State<'_, AppState>) -> Result<RenderResult, String> {
+fn render_resume(
+    resume_id: String,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<RenderResult, String> {
     let root = selected_workspace_root(&state)?;
     let profile = workspace::load_profile(&root)?;
     let blocks = workspace::load_blocks(&root)?;
@@ -144,7 +173,9 @@ fn render_resume(resume_id: String, state: State<'_, AppState>) -> Result<Render
         .cloned()
         .ok_or_else(|| format!("Unknown resume id: {resume_id}"))?;
 
-    let result = renderer::render_resume(&root, &profile, &blocks, &resume);
+    let resource_dir = app.path().resource_dir().ok();
+    let result =
+        renderer::render_resume(&root, &profile, &blocks, &resume, resource_dir.as_deref());
     workspace::append_render_history(&root, &result)?;
     Ok(result)
 }
@@ -152,6 +183,11 @@ fn render_resume(resume_id: String, state: State<'_, AppState>) -> Result<Render
 #[tauri::command(rename_all = "camelCase")]
 fn run_llm_task(request: LlmTaskRequest) -> Result<LlmTaskResult, String> {
     Ok(llm::run_task(&request))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn ensure_ai_service_started(state: State<'_, AppState>) -> Result<AiServiceStatus, String> {
+    ai_service::ensure_started(&state)
 }
 
 fn selected_workspace_root(state: &State<'_, AppState>) -> Result<PathBuf, String> {
@@ -178,7 +214,9 @@ pub fn run() {
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             create_sample_workspace,
+            create_sample_workspace_dialog,
             select_workspace,
+            open_workspace_dialog,
             load_workspace_summary,
             load_workspace_snapshot,
             get_profile,
@@ -195,7 +233,8 @@ pub fn run() {
             save_app_workspace_state,
             list_render_history,
             render_resume,
-            run_llm_task
+            run_llm_task,
+            ensure_ai_service_started
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

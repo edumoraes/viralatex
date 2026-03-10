@@ -120,3 +120,11 @@ pub struct LlmTaskResult {
     #[serde(default)]
     pub warnings: Vec<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiServiceStatus {
+    pub base_url: String,
+    pub provider: String,
+    pub healthy: bool,
+}

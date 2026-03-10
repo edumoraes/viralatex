@@ -5,7 +5,7 @@ FILE ?=
 TEXINPUTS_VALUE = /workspace/src/template//:/workspace/src/shared//:/workspace/src/shared/sections//:
 LATEXMK_FLAGS = $(LATEXMK_ENGINE) -interaction=nonstopmode -halt-on-error -output-directory=out
 
-.PHONY: image build build-all build-pt build-en test lint security check hooks-install hooks-run clean shell
+.PHONY: image build build-all build-pt build-en test lint security check hooks-install hooks-run tectonic-setup clean shell
 
 image:
 	docker build -t $(IMAGE_NAME) .
@@ -67,6 +67,9 @@ hooks-install:
 
 hooks-run:
 	bin/run-hooks
+
+tectonic-setup:
+	bin/setup-tectonic $(TECTONIC_BIN)
 
 clean:
 	rm -rf out

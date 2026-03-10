@@ -24,6 +24,9 @@
   },
   "bundle": {
     "active": true,
+    "resources": [
+      "binaries"
+    ],
     "icon": [
       "icons/icon.svg"
     ],

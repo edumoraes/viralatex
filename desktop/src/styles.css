@@ -1,9 +1,9 @@
 :root {
-  color: #f3ecdf;
+  color: #f4efe4;
   background:
-    radial-gradient(circle at top left, rgba(190, 109, 53, 0.18), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(62, 110, 101, 0.18), transparent 30%),
-    linear-gradient(180deg, #191614 0%, #11100f 100%);
+    radial-gradient(circle at top left, rgba(203, 120, 58, 0.2), transparent 26%),
+    radial-gradient(circle at bottom right, rgba(49, 106, 98, 0.22), transparent 28%),
+    linear-gradient(180deg, #181514 0%, #0f0e0d 100%);
   font-family: "Iowan Old Style", "Palatino Linotype", serif;
   line-height: 1.5;
   font-weight: 400;
@@ -20,8 +20,6 @@ body {
 }
 
 button,
-input,
-select,
 textarea {
   font: inherit;
 }
@@ -30,8 +28,8 @@ button {
   border: 0;
   border-radius: 999px;
   padding: 0.8rem 1.2rem;
-  background: #d18a45;
-  color: #211912;
+  background: #cf8744;
+  color: #1f1710;
   cursor: pointer;
   transition: transform 160ms ease, opacity 160ms ease;
 }
@@ -41,8 +39,8 @@ button:hover:enabled {
 }
 
 button.secondary {
-  background: rgba(243, 236, 223, 0.1);
-  color: #f3ecdf;
+  background: rgba(244, 239, 228, 0.1);
+  color: #f4efe4;
 }
 
 button:disabled {
@@ -50,30 +48,25 @@ button:disabled {
   cursor: default;
 }
 
-input,
-select,
 textarea {
   width: 100%;
-  border: 1px solid rgba(243, 236, 223, 0.14);
-  border-radius: 16px;
-  padding: 0.85rem 1rem;
-  background: rgba(17, 16, 15, 0.78);
-  color: #f3ecdf;
-}
-
-textarea {
-  min-height: 7rem;
+  border: 1px solid rgba(244, 239, 228, 0.14);
+  border-radius: 20px;
+  padding: 1rem 1.1rem;
+  background: rgba(18, 17, 16, 0.82);
+  color: #f4efe4;
+  min-height: 8rem;
   resize: vertical;
 }
 
 label {
   display: grid;
   gap: 0.45rem;
-  color: rgba(243, 236, 223, 0.86);
+  color: rgba(244, 239, 228, 0.86);
 }
 
 .shell {
-  width: min(1240px, calc(100vw - 2rem));
+  width: min(1280px, calc(100vw - 2rem));
   margin: 0 auto;
   padding: 2rem 0 4rem;
 }
@@ -81,7 +74,6 @@ label {
 .hero,
 .grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1.5rem;
 }
 
@@ -90,10 +82,12 @@ label {
   align-items: start;
 }
 
-.editor-grid {
-  display: grid;
+.hero-single {
+  grid-template-columns: 1.15fr 0.85fr;
+}
+
+.dashboard-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1.5rem;
   margin-bottom: 1.5rem;
 }
 
@@ -101,7 +95,7 @@ label {
   margin: 0 0 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  color: #d18a45;
+  color: #cf8744;
   font-size: 0.82rem;
 }
 
@@ -113,18 +107,22 @@ label {
 
 .lede {
   max-width: 62ch;
-  color: rgba(243, 236, 223, 0.78);
+  color: rgba(244, 239, 228, 0.78);
   font-size: 1.05rem;
 }
 
 .hero-card,
 .panel {
-  border: 1px solid rgba(243, 236, 223, 0.12);
+  border: 1px solid rgba(244, 239, 228, 0.12);
   border-radius: 28px;
   padding: 1.25rem;
-  background: rgba(27, 24, 22, 0.8);
+  background: rgba(26, 23, 21, 0.82);
   backdrop-filter: blur(16px);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
+}
+
+.panel h2 {
+  margin-top: 0;
 }
 
 .button-row {
@@ -141,13 +139,20 @@ label {
   align-items: center;
 }
 
+.chat-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+}
+
 .hint,
 .placeholder {
-  color: rgba(243, 236, 223, 0.68);
+  color: rgba(244, 239, 228, 0.68);
 }
 
 .error {
-  color: #ff9e83;
+  color: #ff9d83;
 }
 
 .stats {
@@ -159,56 +164,54 @@ label {
 .stats div {
   padding: 0.9rem;
   border-radius: 18px;
-  background: rgba(243, 236, 223, 0.05);
+  background: rgba(244, 239, 228, 0.05);
 }
 
 .stats dt {
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: rgba(243, 236, 223, 0.56);
+  color: rgba(244, 239, 228, 0.56);
 }
 
 .stats dd {
   margin: 0.35rem 0 0;
   font-size: 1.02rem;
-}
-
-.field-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.85rem;
-}
-
-.field-span {
-  grid-column: 1 / -1;
+  word-break: break-word;
 }
 
 .picker-list {
   display: flex;
   gap: 0.55rem;
   flex-wrap: wrap;
-  margin-bottom: 1rem;
 }
 
 .chip {
   padding: 0.45rem 0.8rem;
   border-radius: 999px;
-  background: rgba(243, 236, 223, 0.08);
-  color: #f3ecdf;
+  background: rgba(244, 239, 228, 0.08);
+  color: #f4efe4;
+}
+
+button.chip {
+  padding: 0.55rem 0.95rem;
 }
 
 .chip-active {
-  background: #d18a45;
+  background: #cf8744;
   color: #22180f;
 }
 
 .result,
-.history-card {
-  margin-top: 1rem;
+.history-card,
+.message-card {
   padding: 1rem;
   border-radius: 20px;
-  background: rgba(243, 236, 223, 0.05);
+  background: rgba(244, 239, 228, 0.05);
+}
+
+.result {
+  margin-top: 1rem;
 }
 
 .history-list {
@@ -216,17 +219,77 @@ label {
   gap: 0.8rem;
 }
 
+.chat-panel {
+  padding-bottom: 1.5rem;
+}
+
+.chat-thread {
+  display: grid;
+  gap: 0.9rem;
+  min-height: 26rem;
+  max-height: 54vh;
+  overflow: auto;
+  margin: 1.25rem 0;
+  padding-right: 0.35rem;
+}
+
+.message-card {
+  max-width: min(76ch, 100%);
+}
+
+.message-user {
+  justify-self: end;
+  background: rgba(207, 135, 68, 0.16);
+}
+
+.message-role {
+  margin: 0 0 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.75rem;
+  color: rgba(244, 239, 228, 0.62);
+}
+
+.message-card p:last-child,
+.history-card p:last-child,
+.result p:last-child,
+.empty-thread p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.empty-thread {
+  min-height: 18rem;
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 @media (max-width: 1080px) {
-  .editor-grid {
+  .hero-single,
+  .dashboard-grid {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 900px) {
-  .hero,
-  .grid,
-  .stats,
-  .field-grid {
+  .stats {
     grid-template-columns: 1fr;
   }
 
@@ -238,6 +301,10 @@ label {
   .button-row,
   .section-header {
     flex-direction: column;
+    align-items: stretch;
+  }
+
+  .chat-meta {
     align-items: stretch;
   }
 }

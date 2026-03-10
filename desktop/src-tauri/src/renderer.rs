@@ -6,12 +6,30 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::tempdir;
 
+const MANAGED_TECTONIC_RELATIVE_PATH: &str = "binaries/tectonic";
+
 pub fn render_resume(
     workspace_root: &Path,
     profile: &Profile,
     blocks: &[Block],
     resume: &ResumeDefinition,
+    resource_dir: Option<&Path>,
 ) -> RenderResult {
+    render_resume_with_resolver(workspace_root, profile, blocks, resume, || {
+        resolve_tectonic_path(resource_dir)
+    })
+}
+
+fn render_resume_with_resolver<F>(
+    workspace_root: &Path,
+    profile: &Profile,
+    blocks: &[Block],
+    resume: &ResumeDefinition,
+    resolve_tectonic: F,
+) -> RenderResult
+where
+    F: FnOnce() -> Result<PathBuf, String>,
+{
     let job_id = format!("render-{}", unix_millis());
     let renders_root = workspace_root.join("renders");
 
@@ -23,7 +41,7 @@ pub fn render_resume(
         );
     }
 
-    let tectonic_path = match resolve_tectonic_path() {
+    let tectonic_path = match resolve_tectonic() {
         Ok(path) => path,
         Err(error) => return failed_result(job_id, resume.id.clone(), error),
     };
@@ -406,24 +424,47 @@ fn join_entries(entries: Vec<String>) -> String {
     entries.join("\n\n\\spacer\n\n")
 }
 
-fn resolve_tectonic_path() -> Result<PathBuf, String> {
-    if let Ok(path) = std::env::var("TECTONIC_BIN") {
-        let resolved = PathBuf::from(path);
-        if resolved.is_file() {
-            return Ok(resolved);
-        }
+fn resolve_tectonic_path(resource_dir: Option<&Path>) -> Result<PathBuf, String> {
+    let packaged_binary = resource_dir.map(|path| path.join(MANAGED_TECTONIC_RELATIVE_PATH));
+
+    resolve_tectonic_path_from(
+        std::env::var("TECTONIC_BIN").ok().map(PathBuf::from),
+        managed_tectonic_path(),
+        packaged_binary,
+        || which::which("tectonic").map_err(|_| missing_tectonic_error_message()),
+    )
+}
+
+fn resolve_tectonic_path_from<F>(
+    env_override: Option<PathBuf>,
+    managed_binary: PathBuf,
+    packaged_binary: Option<PathBuf>,
+    system_lookup: F,
+) -> Result<PathBuf, String>
+where
+    F: FnOnce() -> Result<PathBuf, String>,
+{
+    if let Some(resolved) = env_override.filter(|path| path.is_file()) {
+        return Ok(resolved);
     }
 
-    let bundled = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries/tectonic");
-    if bundled.is_file() {
-        return Ok(bundled);
+    if managed_binary.is_file() {
+        return Ok(managed_binary);
     }
 
-    which::which("tectonic")
-        .map_err(|_| {
-            "Tectonic executable not found. Set TECTONIC_BIN, place a binary at desktop/src-tauri/binaries/tectonic, or install tectonic locally."
-                .to_string()
-        })
+    if let Some(packaged_binary) = packaged_binary.filter(|path| path.is_file()) {
+        return Ok(packaged_binary);
+    }
+
+    system_lookup().map_err(|_| missing_tectonic_error_message())
+}
+
+fn managed_tectonic_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(MANAGED_TECTONIC_RELATIVE_PATH)
+}
+
+fn missing_tectonic_error_message() -> String {
+    "Tectonic executable not found. Run 'bin/setup-tectonic /path/to/tectonic' or set TECTONIC_BIN before rendering.".to_string()
 }
 
 fn failed_result(job_id: String, resume_id: String, error_message: String) -> RenderResult {
@@ -469,4 +510,109 @@ fn escape_tex(input: &str) -> String {
     }
 
     escaped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{Profile, ResumeDefinition, Roles};
+    use tempfile::tempdir;
+
+    #[test]
+    fn prefers_env_override_then_managed_then_packaged_then_system() {
+        let root = tempdir().expect("tempdir should exist");
+        let env_override = root.path().join("env-tectonic");
+        let managed_binary = root.path().join("managed/tectonic");
+        let packaged_binary = root.path().join("resources/binaries/tectonic");
+
+        fs::create_dir_all(managed_binary.parent().expect("managed parent"))
+            .expect("managed dir should be created");
+        fs::create_dir_all(packaged_binary.parent().expect("packaged parent"))
+            .expect("packaged dir should be created");
+        fs::write(&managed_binary, "managed").expect("managed binary should exist");
+        fs::write(&packaged_binary, "packaged").expect("packaged binary should exist");
+
+        let from_managed = resolve_tectonic_path_from(
+            Some(env_override.clone()),
+            managed_binary.clone(),
+            Some(packaged_binary.clone()),
+            || Ok(root.path().join("system-tectonic")),
+        )
+        .expect("managed binary should resolve");
+        assert_eq!(from_managed, managed_binary);
+
+        fs::write(&env_override, "env").expect("env binary should exist");
+        let from_env = resolve_tectonic_path_from(
+            Some(env_override.clone()),
+            managed_binary.clone(),
+            Some(packaged_binary.clone()),
+            || Ok(root.path().join("system-tectonic")),
+        )
+        .expect("env binary should resolve");
+        assert_eq!(from_env, env_override);
+
+        fs::remove_file(&env_override).expect("env binary should be removed");
+        fs::remove_file(&managed_binary).expect("managed binary should be removed");
+        let from_packaged = resolve_tectonic_path_from(
+            Some(env_override),
+            managed_binary,
+            Some(packaged_binary.clone()),
+            || Ok(root.path().join("system-tectonic")),
+        )
+        .expect("packaged binary should resolve");
+        assert_eq!(from_packaged, packaged_binary);
+    }
+
+    #[test]
+    fn reports_actionable_error_when_no_binary_is_available() {
+        let root = tempdir().expect("tempdir should exist");
+        let error = resolve_tectonic_path_from(
+            None,
+            root.path().join("managed/tectonic"),
+            Some(root.path().join("resources/binaries/tectonic")),
+            || Err("not found".to_string()),
+        )
+        .expect_err("missing binary should return an error");
+
+        assert!(error.contains("bin/setup-tectonic"));
+        assert!(error.contains("TECTONIC_BIN"));
+    }
+
+    #[test]
+    fn render_resume_returns_failed_result_when_binary_resolution_fails() {
+        let workspace_root = tempdir().expect("workspace tempdir should exist");
+        fs::create_dir_all(workspace_root.path().join("renders"))
+            .expect("renders dir should exist");
+
+        let profile = Profile {
+            name: "Edu".to_string(),
+            roles: Roles {
+                pt: "Dev".to_string(),
+                en: "Dev".to_string(),
+            },
+            email: "edu@example.com".to_string(),
+            location: "Manaus".to_string(),
+            linkedin: "linkedin.com/in/edu".to_string(),
+            github: "github.com/edu".to_string(),
+        };
+        let resume = ResumeDefinition {
+            id: "base-en".to_string(),
+            title: "Base".to_string(),
+            language: "en".to_string(),
+            role_key: "en".to_string(),
+            block_ids: Vec::new(),
+        };
+
+        let result =
+            render_resume_with_resolver(workspace_root.path(), &profile, &[], &resume, || {
+                Err(missing_tectonic_error_message())
+            });
+
+        assert_eq!(result.status, "failed");
+        assert!(result.output_path.is_none());
+        assert_eq!(
+            result.error_message.as_deref(),
+            Some(missing_tectonic_error_message().as_str())
+        );
+    }
 }
