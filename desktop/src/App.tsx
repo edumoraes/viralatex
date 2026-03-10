@@ -172,6 +172,10 @@ async function updateAiProviderConfig(config: AiProviderConfigInput): Promise<Ai
   return invoke("update_ai_provider_config", { config });
 }
 
+function isDialogCancellation(reason: unknown): boolean {
+  return String(reason) === "Folder selection cancelled.";
+}
+
 async function fetchThreadState(baseUrl: string, threadId: string): Promise<{ status: string; values: ChatState }> {
   const response = await fetch(`${baseUrl}/threads/${encodeURIComponent(threadId)}/state`);
   if (!response.ok) {
@@ -575,7 +579,9 @@ export default function App() {
       setSnapshot(nextSnapshot);
       setMessage(`Workspace loaded from ${nextSnapshot.summary.rootPath}.`);
     } catch (reason) {
-      setError(String(reason));
+      if (!isDialogCancellation(reason)) {
+        setError(String(reason));
+      }
     } finally {
       setBusy(false);
     }
@@ -589,7 +595,9 @@ export default function App() {
       setSnapshot(nextSnapshot);
       setMessage(`Sample workspace created at ${nextSnapshot.summary.rootPath}.`);
     } catch (reason) {
-      setError(String(reason));
+      if (!isDialogCancellation(reason)) {
+        setError(String(reason));
+      }
     } finally {
       setBusy(false);
     }

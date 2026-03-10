@@ -26,11 +26,17 @@ fn create_sample_workspace(
 }
 
 #[tauri::command(rename_all = "camelCase")]
-fn create_sample_workspace_dialog(state: State<'_, AppState>) -> Result<WorkspaceSnapshot, String> {
-    let root = rfd::FileDialog::new()
-        .set_title("Choose a folder for the sample workspace")
-        .pick_folder()
-        .ok_or_else(|| "Folder selection cancelled.".to_string())?;
+async fn create_sample_workspace_dialog(
+    state: State<'_, AppState>,
+) -> Result<WorkspaceSnapshot, String> {
+    let root = tauri::async_runtime::spawn_blocking(|| {
+        rfd::FileDialog::new()
+            .set_title("Choose a folder for the sample workspace")
+            .pick_folder()
+    })
+    .await
+    .map_err(|error| format!("Failed to join folder dialog task: {error}"))?
+    .ok_or_else(|| "Folder selection cancelled.".to_string())?;
 
     workspace::create_sample_workspace(&root)?;
     set_selected_workspace(&state, &root)?;
@@ -48,11 +54,15 @@ fn select_workspace(path: String, state: State<'_, AppState>) -> Result<Workspac
 }
 
 #[tauri::command(rename_all = "camelCase")]
-fn open_workspace_dialog(state: State<'_, AppState>) -> Result<WorkspaceSnapshot, String> {
-    let root = rfd::FileDialog::new()
-        .set_title("Choose a workspace directory")
-        .pick_folder()
-        .ok_or_else(|| "Folder selection cancelled.".to_string())?;
+async fn open_workspace_dialog(state: State<'_, AppState>) -> Result<WorkspaceSnapshot, String> {
+    let root = tauri::async_runtime::spawn_blocking(|| {
+        rfd::FileDialog::new()
+            .set_title("Choose a workspace directory")
+            .pick_folder()
+    })
+    .await
+    .map_err(|error| format!("Failed to join folder dialog task: {error}"))?
+    .ok_or_else(|| "Folder selection cancelled.".to_string())?;
 
     workspace::validate_workspace(&root)?;
     set_selected_workspace(&state, &root)?;

@@ -31,6 +31,58 @@ const invokeMock = vi.fn(async (command: string) => {
   throw new Error(`Unexpected invoke command: ${command}`);
 });
 
+const workspaceSnapshot = {
+  summary: {
+    rootPath: "/tmp/workspace",
+    workspaceName: "Workspace Test",
+    profileName: "Eduardo",
+    availableLanguages: ["en", "pt"],
+    templateCount: 1,
+    blockCount: 2,
+    resumeCount: 1,
+    renderHistoryCount: 0
+  },
+  manifest: {
+    schemaVersion: 1,
+    workspaceId: "workspace-test",
+    workspaceName: "Workspace Test",
+    defaultTemplateId: "default"
+  },
+  templates: [
+    {
+      id: "default",
+      name: "Default",
+      engine: "tectonic",
+      description: "Default template"
+    }
+  ],
+  profile: {
+    name: "Eduardo",
+    roles: {
+      pt: "Backend",
+      en: "Backend"
+    },
+    email: "edu@example.com",
+    location: "Manaus",
+    linkedin: "linkedin.com/in/edu",
+    github: "github.com/edu"
+  },
+  blocks: [],
+  resumes: [
+    {
+      id: "resume-en",
+      title: "Resume",
+      language: "en",
+      roleKey: "en",
+      blockIds: []
+    }
+  ],
+  renderHistory: [],
+  appState: {
+    lastSelectedResumeId: "resume-en"
+  }
+};
+
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: invokeMock
 }));
@@ -222,5 +274,75 @@ describe("App chat flow", () => {
 
     expect((await screen.findAllByText("openai")).length).toBeGreaterThan(0);
     expect(screen.getByText("openai:gpt-4o-mini")).toBeInTheDocument();
+  });
+
+  it("loads a workspace from the folder dialog", async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "ensure_ai_service_started") {
+        return {
+          baseUrl: "http://127.0.0.1:8765",
+          provider: "stub",
+          model: "stub",
+          healthy: true
+        };
+      }
+
+      if (command === "load_ai_provider_config") {
+        return {
+          provider: "stub",
+          hasApiKey: false
+        };
+      }
+
+      if (command === "open_workspace_dialog") {
+        return workspaceSnapshot;
+      }
+
+      throw new Error(`Unexpected invoke command: ${command}`);
+    });
+
+    const { default: App } = await import("./App");
+    render(<App />);
+
+    await screen.findByText("State: ready");
+    await userEvent.click(screen.getByRole("button", { name: "Open workspace" }));
+
+    expect(await screen.findByText("Workspace Test")).toBeInTheDocument();
+    expect(screen.getByText("Workspace loaded from /tmp/workspace.")).toBeInTheDocument();
+  });
+
+  it("does not show an error when the folder dialog is cancelled", async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "ensure_ai_service_started") {
+        return {
+          baseUrl: "http://127.0.0.1:8765",
+          provider: "stub",
+          model: "stub",
+          healthy: true
+        };
+      }
+
+      if (command === "load_ai_provider_config") {
+        return {
+          provider: "stub",
+          hasApiKey: false
+        };
+      }
+
+      if (command === "open_workspace_dialog") {
+        throw "Folder selection cancelled.";
+      }
+
+      throw new Error(`Unexpected invoke command: ${command}`);
+    });
+
+    const { default: App } = await import("./App");
+    render(<App />);
+
+    await screen.findByText("State: ready");
+    await userEvent.click(screen.getByRole("button", { name: "Open workspace" }));
+
+    expect(screen.queryByText("Folder selection cancelled.")).not.toBeInTheDocument();
+    expect(screen.getByText("Open a workspace or create a sample workspace.")).toBeInTheDocument();
   });
 });
