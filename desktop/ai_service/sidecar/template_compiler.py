@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
+from pathlib import PurePosixPath
 from tempfile import TemporaryDirectory
 from typing import Any
 
@@ -14,8 +15,9 @@ from .config import managed_tectonic_path
 
 try:
     from langchain.tools import ToolRuntime, tool
+    from pydantic import BaseModel, Field
 except Exception:
-    ToolRuntime = tool = None
+    ToolRuntime = tool = BaseModel = Field = None
 
 
 def resolve_tectonic_path() -> Path:
@@ -38,16 +40,28 @@ def resolve_tectonic_path() -> Path:
     )
 
 
-def resolve_template_root(workspace_root: Path, template_id: str) -> Path:
-    template_root = (workspace_root / "templates" / template_id).resolve()
-    templates_root = (workspace_root / "templates").resolve()
+def documents_root(workspace_root: Path) -> Path:
+    return (workspace_root / "documents").resolve()
+
+
+def normalize_document_path(document_path: str) -> str:
+    normalized = PurePosixPath(document_path.strip())
+    parts = [part for part in normalized.parts if part not in {"", "/"}]
+    if parts[:1] == ["documents"]:
+        parts = parts[1:]
+    return PurePosixPath(*parts).as_posix() if parts else ""
+
+
+def resolve_document_path(workspace_root: Path, document_path: str) -> Path:
+    docs_root = documents_root(workspace_root)
+    candidate = (docs_root / normalize_document_path(document_path)).resolve()
     try:
-        template_root.relative_to(templates_root)
+        candidate.relative_to(docs_root)
     except ValueError as error:
-        raise ValueError(f"Template id resolves outside templates root: {template_id}") from error
-    if not template_root.is_dir():
-        raise FileNotFoundError(f"Unknown template id: {template_id}")
-    return template_root
+        raise ValueError("Requested document is outside the documents root.") from error
+    if not candidate.is_file():
+        raise FileNotFoundError(f"Document entrypoint does not exist: {candidate}")
+    return candidate
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -60,66 +74,82 @@ def write_yaml(path: Path, value: dict[str, Any]) -> None:
         yaml.safe_dump(value, handle, sort_keys=False, allow_unicode=True)
 
 
-def resolve_template_manifest(workspace_root: Path, template_id: str) -> tuple[Path, dict[str, Any]]:
-    template_root = resolve_template_root(workspace_root, template_id)
-    manifest_path = template_root / "template.yml"
-    if not manifest_path.is_file():
-        raise FileNotFoundError(f"Missing template manifest: {manifest_path}")
-    return template_root, load_yaml(manifest_path)
-
-
-def resolve_template_entrypoint(template_root: Path, manifest: dict[str, Any], entrypoint: str | None) -> Path:
-    chosen_entrypoint = (entrypoint or manifest.get("entrypoint") or "").strip()
-    if not chosen_entrypoint:
-        raise ValueError("Template manifest must define a non-empty entrypoint.")
-
-    candidate = (template_root / chosen_entrypoint).resolve()
-    try:
-        candidate.relative_to(template_root.resolve())
-    except ValueError as error:
-        raise ValueError("Requested entrypoint is outside the template root.") from error
-    if not candidate.is_file():
-        raise FileNotFoundError(f"Template entrypoint does not exist: {candidate}")
-    return candidate
-
-
 def failed_compile_result(
-    template_id: str,
-    entrypoint: str | None,
+    document_path: str | None,
     error_message: str,
 ) -> dict[str, Any]:
     return {
         "status": "failed",
-        "template_id": template_id,
-        "entrypoint": entrypoint,
+        "document_path": document_path,
         "output_path": None,
         "log_path": None,
         "error_message": error_message,
     }
 
 
-def compile_workspace_template(
+if BaseModel is not None:
+
+    class CompileLatexDocumentArgs(BaseModel):
+        document_path: str = Field(description="Relative `.tex` path under `/documents/`.")
+        job_name: str | None = Field(
+            default=None,
+            description="Optional output folder name under `/renders/agent/`.",
+        )
+else:
+    CompileLatexDocumentArgs = None
+
+
+def workspace_root_from_runtime(runtime: Any) -> str:
+    context = getattr(runtime, "context", None)
+    if isinstance(context, dict):
+        value = str(context.get("workspaceRoot") or "").strip()
+        if value:
+            return value
+    else:
+        value = str(getattr(context, "workspaceRoot", "") or "").strip()
+        if value:
+            return value
+
+    config = getattr(runtime, "config", None)
+    if isinstance(config, dict):
+        direct = str(config.get("workspaceRoot") or "").strip()
+        if direct:
+            return direct
+        nested_context = config.get("context")
+        if isinstance(nested_context, dict):
+            value = str(nested_context.get("workspaceRoot") or "").strip()
+            if value:
+                return value
+        configurable = config.get("configurable")
+        if isinstance(configurable, dict):
+            value = str(configurable.get("workspaceRoot") or "").strip()
+            if value:
+                return value
+    return ""
+
+
+def compile_workspace_document(
     workspace_root: Path,
-    template_id: str,
-    entrypoint: str | None = None,
+    document_path: str,
     job_name: str | None = None,
 ) -> dict[str, Any]:
+    normalized_document_path = normalize_document_path(document_path)
     try:
-        template_root, manifest = resolve_template_manifest(workspace_root, template_id)
-        entrypoint_path = resolve_template_entrypoint(template_root, manifest, entrypoint)
+        entrypoint_path = resolve_document_path(workspace_root, normalized_document_path)
+        docs_root = documents_root(workspace_root)
         tectonic_path = resolve_tectonic_path()
     except (FileNotFoundError, ValueError) as error:
-        return failed_compile_result(template_id, entrypoint, str(error))
+        return failed_compile_result(document_path, str(error))
 
-    job_id = job_name.strip() if job_name and job_name.strip() else f"template-{int(time.time() * 1000)}"
+    job_id = job_name.strip() if job_name and job_name.strip() else f"document-{int(time.time() * 1000)}"
     output_dir = workspace_root / "renders" / "agent" / job_id
     output_dir.mkdir(parents=True, exist_ok=True)
     log_path = output_dir / "render.log"
 
     with TemporaryDirectory() as temp_dir:
-        compile_root = Path(temp_dir) / template_id
-        shutil.copytree(template_root, compile_root)
-        compile_entrypoint = compile_root / entrypoint_path.relative_to(template_root)
+        compile_root = Path(temp_dir) / "documents"
+        shutil.copytree(docs_root, compile_root)
+        compile_entrypoint = compile_root / entrypoint_path.relative_to(docs_root)
         compile_target = compile_entrypoint.relative_to(compile_root).as_posix()
         try:
             completed = subprocess.run(
@@ -138,8 +168,7 @@ def compile_workspace_template(
             )
         except OSError as error:
             return failed_compile_result(
-                template_id,
-                compile_target,
+                normalized_document_path or document_path,
                 f"Failed to execute tectonic: {error}",
             )
 
@@ -150,11 +179,10 @@ def compile_workspace_template(
     if completed.returncode != 0:
         return {
             "status": "failed",
-            "template_id": template_id,
-            "entrypoint": compile_target,
+            "document_path": compile_target,
             "output_path": None,
             "log_path": str(log_path),
-            "error_message": "Tectonic failed to compile the requested template.",
+            "error_message": "Tectonic failed to compile the requested document.",
         }
 
     if not output_path.is_file():
@@ -164,8 +192,7 @@ def compile_workspace_template(
         else:
             return {
                 "status": "failed",
-                "template_id": template_id,
-                "entrypoint": compile_target,
+                "document_path": compile_target,
                 "output_path": None,
                 "log_path": str(log_path),
                 "error_message": f"Tectonic finished without producing a PDF at {output_path}.",
@@ -173,45 +200,34 @@ def compile_workspace_template(
 
     return {
         "status": "completed",
-        "template_id": template_id,
-        "entrypoint": compile_target,
+        "document_path": compile_target,
         "output_path": str(output_path),
         "log_path": str(log_path),
         "error_message": None,
     }
 
 
-if tool is not None:
+if tool is not None and CompileLatexDocumentArgs is not None:
 
-    @tool(parse_docstring=True)
-    def compile_latex_template(
-        template_id: str,
-        entrypoint: str | None = None,
+    @tool(
+        args_schema=CompileLatexDocumentArgs,
+        description="Compile a LaTeX document from the active workspace.",
+    )
+    def compile_latex_document(
+        document_path: str,
         job_name: str | None = None,
-        runtime: ToolRuntime | None = None,
+        runtime: ToolRuntime = None,
     ) -> dict[str, Any]:
-        """Compile a LaTeX template from the active workspace.
-
-        Args:
-            template_id: Template identifier under `/templates/<template_id>/`.
-            entrypoint: Optional relative `.tex` entrypoint inside the template directory.
-            job_name: Optional output folder name under `/renders/agent/`.
-            runtime: Injected tool runtime carrying the active workspace context.
-        """
-
-        context = getattr(runtime, "context", {}) if runtime is not None else {}
-        workspace_root_value = str((context or {}).get("workspaceRoot") or "").strip()
+        workspace_root_value = workspace_root_from_runtime(runtime) if runtime is not None else ""
         if not workspace_root_value:
             return failed_compile_result(
-                template_id,
-                entrypoint,
-                "No workspaceRoot was provided to the compile_latex_template tool.",
+                document_path,
+                "No workspaceRoot was provided to the compile_latex_document tool.",
             )
-        return compile_workspace_template(
+        return compile_workspace_document(
             Path(workspace_root_value).expanduser(),
-            template_id,
-            entrypoint=entrypoint,
+            document_path=document_path,
             job_name=job_name,
         )
 else:
-    compile_latex_template = None
+    compile_latex_document = None

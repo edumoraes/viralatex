@@ -1,4 +1,5 @@
 from .config import (
+    APP_TEMPLATES_PATH,
     DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OPENAI_MODEL,
@@ -6,6 +7,7 @@ from .config import (
     MANAGED_TECTONIC_PATH,
     PORT,
     SUPPORTED_MODELS,
+    app_templates_path,
     choose_model,
     choose_provider,
     managed_tectonic_path,
@@ -15,19 +17,19 @@ from .http_api import ResumeStudioHandler
 from .runtimes import DeepAgentRuntime, StubRuntime, workspace_backend_routes
 from .service import AiService
 from .template_compiler import (
-    compile_latex_template,
-    compile_workspace_template,
+    compile_latex_document,
+    compile_workspace_document,
     failed_compile_result,
     load_yaml,
-    resolve_template_entrypoint,
-    resolve_template_manifest,
-    resolve_template_root,
+    resolve_document_path,
     resolve_tectonic_path,
+    workspace_root_from_runtime,
     write_yaml,
 )
 
 __all__ = [
     "AiService",
+    "APP_TEMPLATES_PATH",
     "DeepAgentRuntime",
     "DEFAULT_ANTHROPIC_MODEL",
     "DEFAULT_OLLAMA_MODEL",
@@ -38,18 +40,18 @@ __all__ = [
     "ResumeStudioHandler",
     "SUPPORTED_MODELS",
     "StubRuntime",
+    "app_templates_path",
     "choose_model",
     "choose_provider",
-    "compile_latex_template",
-    "compile_workspace_template",
+    "compile_latex_document",
+    "compile_workspace_document",
     "failed_compile_result",
     "load_yaml",
     "managed_tectonic_path",
     "provider_from_model",
-    "resolve_template_entrypoint",
-    "resolve_template_manifest",
-    "resolve_template_root",
+    "resolve_document_path",
     "resolve_tectonic_path",
+    "workspace_root_from_runtime",
     "workspace_backend_routes",
     "write_yaml",
 ]

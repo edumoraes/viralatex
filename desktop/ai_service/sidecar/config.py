@@ -17,10 +17,15 @@ SUPPORTED_MODELS = {
 }
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MANAGED_TECTONIC_PATH = REPO_ROOT / "desktop" / "src-tauri" / "binaries" / "tectonic"
+APP_TEMPLATES_PATH = REPO_ROOT / "desktop" / "src-tauri" / "templates"
 
 
 def managed_tectonic_path() -> Path:
     return MANAGED_TECTONIC_PATH
+
+
+def app_templates_path() -> Path:
+    return APP_TEMPLATES_PATH
 
 
 def choose_provider() -> str:

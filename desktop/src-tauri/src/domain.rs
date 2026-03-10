@@ -19,7 +19,6 @@ pub struct TemplateManifest {
     pub id: String,
     pub name: String,
     pub engine: String,
-    pub entrypoint: String,
     #[serde(default)]
     pub description: Option<String>,
 }

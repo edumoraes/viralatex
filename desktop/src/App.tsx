@@ -75,7 +75,6 @@ type WorkspaceSnapshot = {
     id: string;
     name: string;
     engine: string;
-    entrypoint: string;
     description?: string | null;
   }>;
   profile: Profile;
@@ -646,7 +645,7 @@ export default function App() {
           <h1>Chat-first local resume workstation</h1>
           <p className="lede">
             Workspace operations stay local in Tauri and LaTeX rendering stays in Rust. The only editable
-            surface in the UI is the AI chat, now grounded in workspace-owned LaTeX templates.
+            surface in the UI is the AI chat, now grounded in app-defined LaTeX templates and workspace documents.
           </p>
         </div>
         <div className="hero-card">

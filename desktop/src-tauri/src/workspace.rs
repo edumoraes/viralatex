@@ -9,13 +9,17 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
-const REQUIRED_DIRECTORIES: &[&str] = &["profile", "blocks", "resumes", "renders", "templates"];
+const REQUIRED_DIRECTORIES: &[&str] = &["profile", "blocks", "resumes", "renders", "documents"];
 
 pub fn sample_workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/sample-workspace")
         .canonicalize()
         .expect("sample workspace should exist")
+}
+
+pub fn app_templates_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("templates")
 }
 
 pub fn template_root() -> PathBuf {
@@ -51,9 +55,6 @@ pub fn validate_workspace(root: &Path) -> Result<WorkspaceManifest, String> {
     if !profile_path.is_file() {
         return Err(format!("Missing profile file: {}", profile_path.display()));
     }
-
-    load_templates(root)?;
-
     Ok(manifest)
 }
 
@@ -89,7 +90,8 @@ pub fn load_profile(root: &Path) -> Result<Profile, String> {
 }
 
 pub fn load_templates(root: &Path) -> Result<Vec<TemplateManifest>, String> {
-    let templates_root = root.join("templates");
+    let _ = root;
+    let templates_root = app_templates_root();
     let mut templates = Vec::new();
 
     for entry in fs::read_dir(&templates_root).map_err(|error| {
@@ -105,39 +107,13 @@ pub fn load_templates(root: &Path) -> Result<Vec<TemplateManifest>, String> {
             continue;
         }
 
-        let manifest_path = path.join("template.yml");
-        if !manifest_path.is_file() {
-            return Err(format!(
-                "Missing template manifest: {}",
-                manifest_path.display()
-            ));
-        }
-
-        let manifest: TemplateManifest = read_yaml_file(&manifest_path)?;
-        if manifest.id != entry.file_name().to_string_lossy() {
-            return Err(format!(
-                "Template id {} does not match directory name {}.",
-                manifest.id,
-                path.display()
-            ));
-        }
-        if manifest.entrypoint.trim().is_empty() {
-            return Err(format!(
-                "Template {} must define a non-empty entrypoint.",
-                manifest.id
-            ));
-        }
-
-        let entrypoint_path = path.join(&manifest.entrypoint);
-        if !entrypoint_path.is_file() {
-            return Err(format!(
-                "Template {} entrypoint does not exist: {}",
-                manifest.id,
-                entrypoint_path.display()
-            ));
-        }
-
-        templates.push(manifest);
+        let id = entry.file_name().to_string_lossy().to_string();
+        templates.push(TemplateManifest {
+            id: id.clone(),
+            name: humanize_template_name(&id),
+            engine: "tectonic".to_string(),
+            description: None,
+        });
     }
 
     templates.sort_by(|left, right| left.id.cmp(&right.id));
@@ -348,6 +324,7 @@ fn ensure_app_dirs(root: &Path) -> Result<(), String> {
         root.join("blocks").join(ARCHIVED_DIR),
         root.join("resumes").join(ARCHIVED_DIR),
         root.join("renders"),
+        root.join("documents"),
     ] {
         fs::create_dir_all(&path)
             .map_err(|error| format!("Failed to create directory {}: {error}", path.display()))?;
@@ -461,6 +438,20 @@ where
         .map_err(|error| format!("Failed to read YAML file {}: {error}", path.display()))?;
     serde_yaml::from_str(&raw)
         .map_err(|error| format!("Failed to parse YAML file {}: {error}", path.display()))
+}
+
+fn humanize_template_name(id: &str) -> String {
+    id.split(['-', '_', ' '])
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| {
+            let mut chars = segment.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<String>>()
+        .join(" ")
 }
 
 fn write_yaml_file<T>(path: &Path, value: &T) -> Result<(), String>
@@ -615,28 +606,6 @@ mod tests {
         .expect("manifest should be written");
         save_profile(root, &sample_profile()).expect("profile should be saved");
         ensure_app_dirs(root).expect("app dirs should be created");
-        seed_template(root);
-    }
-
-    fn seed_template(root: &Path) {
-        let default_template_root = root.join("templates/default");
-        fs::create_dir_all(&default_template_root).expect("template root should be created");
-        write_yaml_file(
-            &default_template_root.join("template.yml"),
-            &TemplateManifest {
-                id: "default".to_string(),
-                name: "Default".to_string(),
-                engine: "tectonic".to_string(),
-                entrypoint: "resume.tex".to_string(),
-                description: Some("Bundled default template".to_string()),
-            },
-        )
-        .expect("template manifest should be written");
-        fs::write(
-            default_template_root.join("resume.tex"),
-            "\\documentclass{article}\\begin{document}Hello\\end{document}\n",
-        )
-        .expect("template entrypoint should be written");
     }
 
     #[test]
@@ -656,7 +625,6 @@ mod tests {
         .expect("manifest should be written");
         save_profile(root, &sample_profile()).expect("profile should be saved");
         ensure_app_dirs(root).expect("app dirs should be created");
-        seed_template(root);
 
         let manifest = validate_workspace(root).expect("workspace should validate");
         assert_eq!(manifest.schema_version, WORKSPACE_SCHEMA_VERSION);
@@ -690,7 +658,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_requires_templates_directory() {
+    fn workspace_requires_documents_directory() {
         let temp = tempdir().expect("tempdir should exist");
         let root = temp.path();
 
@@ -700,24 +668,39 @@ mod tests {
         )
         .expect("manifest should be written");
         save_profile(root, &sample_profile()).expect("profile should be saved");
-        ensure_app_dirs(root).expect("app dirs should be created");
+        fs::create_dir_all(root.join(APP_DIR)).expect("app dir should exist");
+        fs::create_dir_all(root.join("blocks").join(ARCHIVED_DIR))
+            .expect("block archive should exist");
+        fs::create_dir_all(root.join("resumes").join(ARCHIVED_DIR))
+            .expect("resume archive should exist");
+        fs::create_dir_all(root.join("renders")).expect("renders dir should exist");
 
         let error = validate_workspace(root).expect_err("workspace should fail validation");
         assert!(error.contains("Missing workspace directory"));
-        assert!(error.contains("templates"));
+        assert!(error.contains("documents"));
     }
 
     #[test]
-    fn loads_templates_from_workspace() {
+    fn loads_templates_from_app_assets() {
         let temp = tempdir().expect("tempdir should exist");
         let root = temp.path();
 
         seed_workspace(root, "Templates");
 
         let templates = load_templates(root).expect("templates should load");
-        assert_eq!(templates.len(), 1);
+        assert!(!templates.is_empty());
         assert_eq!(templates[0].id, "default");
-        assert_eq!(templates[0].entrypoint, "resume.tex");
+        assert_eq!(templates[0].name, "Default");
+    }
+
+    #[test]
+    fn validates_workspace_without_template_manifests() {
+        let temp = tempdir().expect("tempdir should exist");
+        let root = temp.path();
+
+        seed_workspace(root, "No Workspace Templates");
+
+        validate_workspace(root).expect("workspace should validate");
     }
 
     #[test]

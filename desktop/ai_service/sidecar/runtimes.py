@@ -5,10 +5,11 @@ import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from .serialization import append_interrupts, chunk_text, serialize
-from .template_compiler import compile_latex_template
+from .config import app_templates_path
+from .template_compiler import compile_latex_document
 
 try:
     from deepagents import create_deep_agent
@@ -20,19 +21,25 @@ except Exception:
     CompositeBackend = FilesystemBackend = StateBackend = SqliteSaver = Command = None
 
 
+class WorkspaceContext(TypedDict, total=False):
+    workspaceRoot: str
+
+
 def workspace_backend_routes(workspace_root: Path) -> dict[str, Any]:
     if FilesystemBackend is None:
         return {
-            "/templates/": workspace_root / "templates",
+            "/app_templates/": app_templates_path(),
             "/profile/": workspace_root / "profile",
             "/blocks/": workspace_root / "blocks",
             "/resumes/": workspace_root / "resumes",
+            "/documents/": workspace_root / "documents",
         }
     return {
-        "/templates/": FilesystemBackend(root_dir=workspace_root / "templates", virtual_mode=True),
+        "/app_templates/": FilesystemBackend(root_dir=app_templates_path(), virtual_mode=True),
         "/profile/": FilesystemBackend(root_dir=workspace_root / "profile", virtual_mode=True),
         "/blocks/": FilesystemBackend(root_dir=workspace_root / "blocks", virtual_mode=True),
         "/resumes/": FilesystemBackend(root_dir=workspace_root / "resumes", virtual_mode=True),
+        "/documents/": FilesystemBackend(root_dir=workspace_root / "documents", virtual_mode=True),
     }
 
 
@@ -83,7 +90,7 @@ class StubRuntime:
         assistant_id = str(uuid.uuid4())
         assistant_content = (
             "Stub DeepAgents runtime active. "
-            f"I can inspect the current workspace ({workspace_name}), read workspace-owned templates, "
+            f"I can inspect the current workspace ({workspace_name}), read app-provided templates, "
             "and persist thread state locally."
         )
         for piece in chunk_text(assistant_content):
@@ -136,7 +143,8 @@ class DeepAgentRuntime:
         self.checkpointer = self._checkpointer_manager.__enter__()
         self.agent = create_deep_agent(
             model=model,
-            tools=[compile_latex_template] if compile_latex_template is not None else [],
+            tools=[compile_latex_document] if compile_latex_document is not None else [],
+            context_schema=WorkspaceContext,
             backend=self.backend_factory,
             checkpointer=self.checkpointer,
             interrupt_on={
@@ -149,11 +157,11 @@ class DeepAgentRuntime:
                 "You only have access to the active workspace filesystem and must treat it as the full scope of work. "
                 "Do not assume access to repository files, app infrastructure, or any paths outside the active workspace. "
                 "The active workspace is the source of truth. "
-                "Use the native Deep Agents file tools only for workspace files under /templates, /profile, /blocks, and /resumes. "
-                "Inspect /templates first when the user asks for LaTeX output, and reuse existing template fragments before creating new ones. "
-                "When editing files under /templates, expect LaTeX source files such as .tex and manifest files such as template.yml; preserve valid LaTeX and YAML syntax, keep entrypoints and relative paths inside the template root, and avoid introducing broken references. "
+                "Use the native Deep Agents file tools only for workspace files under /profile, /blocks, /resumes, and /documents. "
+                "Inspect /app_templates first when the user asks for LaTeX output, and use those app-provided templates as read-only references. "
+                "When editing files under /documents, preserve valid LaTeX syntax and keep document paths inside /documents. "
                 "When editing /profile, /blocks, or /resumes, preserve the existing file format and produce syntactically valid content for that file type. "
-                "Use compile_latex_template when the user asks you to compile a workspace template. "
+                "Use compile_latex_document when the user asks you to compile a workspace document. "
                 "Use /memories/AGENTS.md only for long-term memory."
             ),
         )
