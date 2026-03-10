@@ -16,6 +16,8 @@ backend.pdf
 desktop/node_modules/
 desktop/dist/
 desktop/ai_service/.venv/
+__pycache__/
+*.py[cod]
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
 desktop/src-tauri/binaries/*
