@@ -186,8 +186,11 @@ fn run_llm_task(request: LlmTaskRequest) -> Result<LlmTaskResult, String> {
 }
 
 #[tauri::command(rename_all = "camelCase")]
-fn ensure_ai_service_started(state: State<'_, AppState>) -> Result<AiServiceStatus, String> {
-    ai_service::ensure_started(&state)
+fn ensure_ai_service_started(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<AiServiceStatus, String> {
+    ai_service::ensure_started(&state, &app)
 }
 
 fn selected_workspace_root(state: &State<'_, AppState>) -> Result<PathBuf, String> {

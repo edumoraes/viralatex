@@ -1,6 +1,5 @@
+import { FetchStreamTransport, useStream } from "@langchain/langgraph-sdk/react";
 import { useEffect, useMemo, useState } from "react";
-import { fetchServerSentEvents } from "@tanstack/ai-client";
-import { useChat, type UIMessage } from "@tanstack/ai-react";
 import { invoke } from "@tauri-apps/api/core";
 
 type WorkspaceSummary = {
@@ -81,7 +80,30 @@ type WorkspaceSnapshot = {
 type AiServiceStatus = {
   baseUrl: string;
   provider: string;
+  model: string;
   healthy: boolean;
+};
+
+type ChatMessage = {
+  id?: string;
+  type: string;
+  content?: string | Array<{ text?: string; type?: string }>;
+};
+
+type ChatInterrupt = {
+  id?: string;
+  value?: {
+    action_requests?: Array<{
+      name?: string;
+      args?: Record<string, unknown>;
+    }>;
+  };
+  when?: string;
+};
+
+type ChatState = {
+  messages: ChatMessage[];
+  __interrupt__?: ChatInterrupt[];
 };
 
 type ChatContext = {
@@ -123,6 +145,14 @@ async function ensureAiServiceStarted(): Promise<AiServiceStatus> {
   return invoke("ensure_ai_service_started");
 }
 
+async function fetchThreadState(baseUrl: string, threadId: string): Promise<{ status: string; values: ChatState }> {
+  const response = await fetch(`${baseUrl}/threads/${encodeURIComponent(threadId)}/state`);
+  if (!response.ok) {
+    throw new Error(`Failed to load AI thread state: ${response.statusText}`);
+  }
+  return response.json();
+}
+
 function formatTimestamp(value: string): string {
   const timestamp = Number(value);
   if (Number.isNaN(timestamp)) {
@@ -131,39 +161,80 @@ function formatTimestamp(value: string): string {
   return new Date(timestamp).toLocaleString();
 }
 
-function renderMessageText(message: UIMessage): string {
-  return message.parts
-    .filter((part) => part.type === "text")
-    .map((part) => part.content)
-    .join("");
+function renderMessageText(message: ChatMessage): string {
+  if (typeof message.content === "string") {
+    return message.content;
+  }
+  if (Array.isArray(message.content)) {
+    return message.content
+      .map((part) => part.text ?? "")
+      .filter(Boolean)
+      .join("");
+  }
+  return "";
 }
 
 function ChatSurface({ aiService, context, busy, onBusyChange, onError }: ChatSurfaceProps) {
   const [prompt, setPrompt] = useState("");
+  const [threadId, setThreadId] = useState<string | null>(() => localStorage.getItem("resume-studio-ai-thread-id"));
+  const [initialValues, setInitialValues] = useState<ChatState | null>(null);
+  const [editedContent, setEditedContent] = useState("");
 
-  const body = useMemo(
-    () => ({
-      data: {
-        context
-      }
-    }),
-    [context]
+  const transport = useMemo(
+    () =>
+      new FetchStreamTransport<ChatState>({
+        apiUrl: `${aiService.baseUrl}/stream`
+      }),
+    [aiService.baseUrl]
   );
 
-  const { messages, sendMessage, clear, error, isLoading, status, stop } = useChat({
-    connection: fetchServerSentEvents(`${aiService.baseUrl}/chat`),
-    body
+  const stream = useStream<ChatState>({
+    transport,
+    threadId,
+    initialValues,
+    onThreadId(nextThreadId: string) {
+      setThreadId(nextThreadId);
+      localStorage.setItem("resume-studio-ai-thread-id", nextThreadId);
+    },
+    onError(error: unknown) {
+      onError(String(error));
+    }
   });
 
   useEffect(() => {
-    onBusyChange(isLoading);
-  }, [isLoading, onBusyChange]);
+    onBusyChange(stream.isLoading);
+  }, [onBusyChange, stream.isLoading]);
 
   useEffect(() => {
-    if (error) {
-      onError(error.message);
+    if (!threadId) {
+      setInitialValues({ messages: [] });
+      return;
     }
-  }, [error, onError]);
+    let cancelled = false;
+    void fetchThreadState(aiService.baseUrl, threadId)
+      .then((state) => {
+        if (!cancelled) {
+          setInitialValues(state.values);
+        }
+      })
+      .catch((reason) => {
+        if (!cancelled) {
+          onError(String(reason));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [aiService.baseUrl, onError, threadId]);
+
+  const interrupts = stream.interrupts as ChatInterrupt[];
+  const primaryInterrupt = interrupts[0];
+  const primaryAction = primaryInterrupt?.value?.action_requests?.[0];
+  const proposedContent = typeof primaryAction?.args?.proposed_content === "string" ? primaryAction.args.proposed_content : "";
+
+  useEffect(() => {
+    setEditedContent(proposedContent);
+  }, [proposedContent]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -174,11 +245,70 @@ function ChatSurface({ aiService, context, busy, onBusyChange, onError }: ChatSu
 
     setPrompt("");
     try {
-      await sendMessage(trimmedPrompt);
+      await stream.submit(
+        {
+          messages: [
+            {
+              id: crypto.randomUUID(),
+              type: "human",
+              content: trimmedPrompt
+            }
+          ]
+        },
+        {
+          context,
+          optimisticValues: (current: ChatState) => ({
+            messages: [
+              ...(current.messages ?? []),
+              {
+                id: crypto.randomUUID(),
+                type: "human",
+                content: trimmedPrompt
+              }
+            ]
+          })
+        }
+      );
     } catch (reason) {
       onError(String(reason));
     }
   }
+
+  async function handleDecision(type: "approve" | "reject" | "edit") {
+    try {
+      await stream.submit(null, {
+        context,
+        command: {
+          resume: {
+            decisions: [
+              type === "edit"
+                ? {
+                    type,
+                    edited_action: {
+                      proposed_content: editedContent
+                    }
+                  }
+                : {
+                    type
+                  }
+            ]
+          }
+        }
+      });
+    } catch (reason) {
+      onError(String(reason));
+    }
+  }
+
+  function handleNewThread() {
+    localStorage.removeItem("resume-studio-ai-thread-id");
+    setThreadId(null);
+    setInitialValues({ messages: [] });
+    setEditedContent("");
+  }
+
+  const status = stream.isLoading ? "streaming" : interrupts.length > 0 ? "interrupted" : "ready";
+  const messages = stream.messages as ChatMessage[];
 
   return (
     <article className="panel chat-panel">
@@ -189,6 +319,7 @@ function ChatSurface({ aiService, context, busy, onBusyChange, onError }: ChatSu
         </div>
         <div className="chat-meta">
           <span className="chip chip-active">{aiService.provider}</span>
+          <span className="chip">{aiService.model}</span>
           <span className="hint">State: {status}</span>
         </div>
       </div>
@@ -202,15 +333,45 @@ function ChatSurface({ aiService, context, busy, onBusyChange, onError }: ChatSu
         ) : (
           messages.map((message) => (
             <article
-              key={message.id}
-              className={message.role === "user" ? "message-card message-user" : "message-card"}
+              key={message.id ?? `${message.type}-${renderMessageText(message)}`}
+              className={message.type === "human" || message.type === "user" ? "message-card message-user" : "message-card"}
             >
-              <p className="message-role">{message.role}</p>
+              <p className="message-role">{message.type === "human" ? "user" : message.type}</p>
               <p>{renderMessageText(message)}</p>
             </article>
           ))
         )}
       </div>
+
+      {primaryAction ? (
+        <div className="result">
+          <p>
+            <strong>Approval required:</strong> {primaryAction.name || "workspace action"}
+          </p>
+          {typeof primaryAction.args?.path === "string" ? (
+            <p>
+              <strong>Target:</strong> {primaryAction.args.path}
+            </p>
+          ) : null}
+          <textarea
+            aria-label="Approval edit"
+            value={editedContent}
+            onChange={(event) => setEditedContent(event.target.value)}
+            disabled={busy}
+          />
+          <div className="button-row">
+            <button type="button" disabled={busy} onClick={() => void handleDecision("approve")}>
+              Approve
+            </button>
+            <button className="secondary" type="button" disabled={busy || !editedContent.trim()} onClick={() => void handleDecision("edit")}>
+              Approve edited
+            </button>
+            <button className="secondary" type="button" disabled={busy} onClick={() => void handleDecision("reject")}>
+              Reject
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <form className="chat-form" onSubmit={(event) => void handleSubmit(event)}>
         <label htmlFor="chatPrompt" className="sr-only">
@@ -227,11 +388,11 @@ function ChatSurface({ aiService, context, busy, onBusyChange, onError }: ChatSu
           <button type="submit" disabled={busy || !aiService.healthy}>
             Send prompt
           </button>
-          <button className="secondary" type="button" disabled={!isLoading} onClick={stop}>
+          <button className="secondary" type="button" disabled={!stream.isLoading} onClick={() => void stream.stop()}>
             Stop
           </button>
-          <button className="secondary" type="button" disabled={isLoading || messages.length === 0} onClick={clear}>
-            Clear thread
+          <button className="secondary" type="button" disabled={stream.isLoading} onClick={handleNewThread}>
+            New thread
           </button>
         </div>
       </form>
@@ -261,13 +422,15 @@ export default function App() {
       return;
     }
 
+    const snapshotResumes = snapshot.resumes;
     const nextResumeId =
-      snapshot.appState.lastSelectedResumeId && resumes.some((resume) => resume.id === snapshot.appState.lastSelectedResumeId)
+      snapshot.appState.lastSelectedResumeId &&
+      snapshotResumes.some((resume) => resume.id === snapshot.appState.lastSelectedResumeId)
         ? snapshot.appState.lastSelectedResumeId
-        : resumes[0]?.id ?? "";
+        : snapshotResumes[0]?.id ?? "";
 
     setSelectedResumeId(nextResumeId);
-  }, [snapshot, resumes]);
+  }, [snapshot]);
 
   async function startAiService() {
     try {

@@ -15,6 +15,7 @@ backend.pdf
 *.toc
 desktop/node_modules/
 desktop/dist/
+desktop/ai_service/.venv/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
 desktop/src-tauri/binaries/*

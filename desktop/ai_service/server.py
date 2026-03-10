@@ -1,23 +1,45 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import json
 import os
-import time
-import urllib.error
-import urllib.request
 import uuid
+from dataclasses import asdict, is_dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+from urllib.parse import unquote
+
+import yaml
+from deepagents import create_deep_agent
+from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.types import Command
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("RESUME_STUDIO_AI_PORT", "8765"))
-OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
+DEFAULT_OPENAI_MODEL = "openai:gpt-4o-mini"
+DEFAULT_OLLAMA_MODEL = "ollama:llama3.2"
 
 
-def now_ms() -> int:
-    return int(time.time() * 1000)
+def choose_model() -> str:
+    configured = os.environ.get("RESUME_STUDIO_AI_MODEL")
+    if configured:
+        return configured
+    if os.environ.get("OPENAI_API_KEY"):
+        return DEFAULT_OPENAI_MODEL
+    if os.environ.get("OLLAMA_BASE_URL") or os.environ.get("OLLAMA_MODEL"):
+        return DEFAULT_OLLAMA_MODEL
+    return "stub"
+
+
+def provider_from_model(model: str) -> str:
+    if model == "stub":
+        return "stub"
+    if ":" in model:
+        return model.split(":", 1)[0]
+    return model
 
 
 def json_headers(handler: BaseHTTPRequestHandler, status: int = 200) -> None:
@@ -25,6 +47,7 @@ def json_headers(handler: BaseHTTPRequestHandler, status: int = 200) -> None:
     handler.send_header("Content-Type", "application/json")
     handler.send_header("Access-Control-Allow-Origin", "*")
     handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+    handler.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
     handler.end_headers()
 
 
@@ -35,10 +58,11 @@ def sse_headers(handler: BaseHTTPRequestHandler) -> None:
     handler.send_header("Connection", "close")
     handler.send_header("Access-Control-Allow-Origin", "*")
     handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+    handler.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
     handler.end_headers()
 
 
-def read_json(handler: BaseHTTPRequestHandler) -> dict:
+def read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     content_length = int(handler.headers.get("Content-Length", "0"))
     raw_body = handler.rfile.read(content_length) if content_length > 0 else b"{}"
     if not raw_body:
@@ -46,216 +70,360 @@ def read_json(handler: BaseHTTPRequestHandler) -> dict:
     return json.loads(raw_body.decode("utf-8"))
 
 
-def choose_provider() -> str:
-    if os.environ.get("OPENAI_API_KEY"):
-        return "openai"
-    if os.environ.get("OLLAMA_BASE_URL") or os.environ.get("OLLAMA_MODEL"):
-        return "ollama"
-    return "stub"
-
-
-def extract_message_text(message: dict) -> str:
-    parts = message.get("parts", [])
-    texts = []
-    for part in parts:
-        if part.get("type") == "text":
-            texts.append(part.get("content", ""))
-    return "\n".join([text for text in texts if text])
-
-
-def to_model_messages(messages: list[dict], context: dict) -> list[dict]:
-    workspace_name = context.get("workspaceSummary", {}).get("workspaceName") or "Unknown workspace"
-    selected_resume_id = context.get("selectedResumeId") or "none"
-    available_resumes = ", ".join(context.get("availableResumeIds", [])) or "none"
-    system_prompt = (
-        "You are Resume Studio's local AI assistant. "
-        "You help the user work with a local resume workspace and rendering flow. "
-        "Keep answers concise and actionable. "
-        f"Current workspace: {workspace_name}. "
-        f"Selected resume: {selected_resume_id}. "
-        f"Available resumes: {available_resumes}."
-    )
-
-    model_messages = [{"role": "system", "content": system_prompt}]
-    for message in messages:
-        role = message.get("role")
-        if role not in {"user", "assistant", "system"}:
-            continue
-        text = extract_message_text(message)
-        if text:
-            model_messages.append({"role": role, "content": text})
-    return model_messages
-
-
-def write_sse(handler: BaseHTTPRequestHandler, payload: dict) -> None:
-    handler.wfile.write(f"data: {json.dumps(payload)}\n\n".encode("utf-8"))
+def write_sse(handler: BaseHTTPRequestHandler, event: str, payload: Any) -> None:
+    body = json.dumps(payload, ensure_ascii=False)
+    handler.wfile.write(f"event: {event}\n".encode("utf-8"))
+    handler.wfile.write(f"data: {body}\n\n".encode("utf-8"))
     handler.wfile.flush()
 
 
-def emit_run_started(handler: BaseHTTPRequestHandler, run_id: str, model: str) -> None:
-    write_sse(
-        handler,
-        {
-            "type": "RUN_STARTED",
-            "timestamp": now_ms(),
-            "runId": run_id,
-            "model": model,
-        },
-    )
+def append_interrupts(values: dict[str, Any], interrupts: list[dict[str, Any]]) -> dict[str, Any]:
+    next_values = dict(values)
+    if interrupts:
+        next_values["__interrupt__"] = interrupts
+    elif "__interrupt__" in next_values:
+        del next_values["__interrupt__"]
+    return next_values
 
 
-def emit_text_start(handler: BaseHTTPRequestHandler, message_id: str, model: str) -> None:
-    write_sse(
-        handler,
-        {
-            "type": "TEXT_MESSAGE_START",
-            "timestamp": now_ms(),
-            "messageId": message_id,
-            "role": "assistant",
-            "model": model,
-        },
-    )
+def serialize(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): serialize(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [serialize(item) for item in value]
+    if is_dataclass(value):
+        return serialize(asdict(value))
+    if hasattr(value, "model_dump"):
+        return serialize(value.model_dump())
+    if hasattr(value, "dict"):
+        return serialize(value.dict())
+    if hasattr(value, "value") and hasattr(value, "id"):
+        return {
+            "id": serialize(getattr(value, "id")),
+            "value": serialize(getattr(value, "value")),
+        }
+    if hasattr(value, "content") and hasattr(value, "type"):
+        serialized = {
+            "type": serialize(getattr(value, "type")),
+            "content": serialize(getattr(value, "content")),
+        }
+        for field in [
+            "id",
+            "name",
+            "tool_calls",
+            "tool_call_id",
+            "status",
+            "additional_kwargs",
+            "response_metadata",
+            "usage_metadata",
+        ]:
+            if hasattr(value, field):
+                field_value = serialize(getattr(value, field))
+                if field_value not in (None, [], {}):
+                    serialized[field] = field_value
+        return serialized
+    if hasattr(value, "__dict__"):
+        return serialize(vars(value))
+    return str(value)
 
 
-def emit_text_delta(handler: BaseHTTPRequestHandler, message_id: str, model: str, delta: str) -> None:
-    write_sse(
-        handler,
-        {
-            "type": "TEXT_MESSAGE_CONTENT",
-            "timestamp": now_ms(),
-            "messageId": message_id,
-            "delta": delta,
-            "model": model,
-        },
-    )
+def load_yaml(path: Path) -> dict[str, Any]:
+    with path.open(encoding="utf-8") as handle:
+        return yaml.safe_load(handle) or {}
 
 
-def emit_text_end(handler: BaseHTTPRequestHandler, message_id: str, model: str) -> None:
-    write_sse(
-        handler,
-        {
-            "type": "TEXT_MESSAGE_END",
-            "timestamp": now_ms(),
-            "messageId": message_id,
-            "model": model,
-        },
-    )
+def write_yaml(path: Path, value: dict[str, Any]) -> None:
+    with path.open("w", encoding="utf-8") as handle:
+        yaml.safe_dump(value, handle, sort_keys=False, allow_unicode=True)
 
 
-def emit_run_finished(handler: BaseHTTPRequestHandler, run_id: str, model: str) -> None:
-    write_sse(
-        handler,
-        {
-            "type": "RUN_FINISHED",
-            "timestamp": now_ms(),
-            "runId": run_id,
-            "finishReason": "stop",
-            "model": model,
-        },
-    )
-    handler.wfile.write(b"data: [DONE]\n\n")
-    handler.wfile.flush()
-    handler.close_connection = True
+class StubRuntime:
+    def __init__(self, data_dir: Path) -> None:
+        self.thread_dir = data_dir / "threads"
+        self.thread_dir.mkdir(parents=True, exist_ok=True)
 
+    def state_path(self, thread_id: str) -> Path:
+        return self.thread_dir / f"{thread_id}.json"
 
-def emit_run_error(handler: BaseHTTPRequestHandler, run_id: str, model: str, message: str) -> None:
-    write_sse(
-        handler,
-        {
-            "type": "RUN_ERROR",
-            "timestamp": now_ms(),
-            "runId": run_id,
-            "model": model,
-            "error": {"message": message},
-        },
-    )
-    handler.wfile.write(b"data: [DONE]\n\n")
-    handler.wfile.flush()
-    handler.close_connection = True
+    def load_state(self, thread_id: str) -> dict[str, Any]:
+        path = self.state_path(thread_id)
+        if not path.exists():
+            return {"status": "idle", "values": {"messages": []}, "interrupts": [], "pending": None}
+        with path.open(encoding="utf-8") as handle:
+            return json.load(handle)
 
+    def save_state(self, thread_id: str, state: dict[str, Any]) -> None:
+        with self.state_path(thread_id).open("w", encoding="utf-8") as handle:
+            json.dump(state, handle, ensure_ascii=False, indent=2)
 
-def stream_stub(handler: BaseHTTPRequestHandler, model_messages: list[dict], model: str) -> None:
-    last_user_message = ""
-    for message in reversed(model_messages):
-        if message["role"] == "user":
-            last_user_message = message["content"]
-            break
+    def get_state(self, thread_id: str) -> dict[str, Any]:
+        state = self.load_state(thread_id)
+        values = append_interrupts(state["values"], state.get("interrupts", []))
+        return {"status": state["status"], "values": values}
 
-    reply = (
-        "Stub provider active. "
-        "The Python sidecar is running and ready for a real provider. "
-        "Last user prompt:\n"
-        f"{last_user_message or 'No prompt received.'}"
-    )
+    def stream(
+        self,
+        thread_id: str,
+        input_value: dict[str, Any] | None,
+        command: dict[str, Any] | None,
+        context: dict[str, Any],
+    ) -> list[tuple[str, dict[str, Any]]]:
+        if command:
+            return self.resume(thread_id, command, context)
+        if not input_value:
+            raise ValueError("Missing input for stream request.")
 
-    for token in reply.split(" "):
-        emit_text_delta(handler, handler.message_id, model, f"{token} ")
-        time.sleep(0.02)
+        state = self.load_state(thread_id)
+        messages = list(state["values"].get("messages", []))
+        incoming = serialize(input_value.get("messages", []))
+        messages.extend(incoming)
 
+        prompt = ""
+        if incoming:
+            prompt = str(incoming[-1].get("content", ""))
 
-def stream_openai(handler: BaseHTTPRequestHandler, model_messages: list[dict], model: str) -> None:
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not configured.")
+        workspace_root = Path(context.get("workspaceRoot") or "")
+        events: list[tuple[str, dict[str, Any]]] = []
 
-    request = urllib.request.Request(
-        f"{OPENAI_BASE_URL}/chat/completions",
-        data=json.dumps(
-            {
-                "model": model,
-                "messages": model_messages,
-                "stream": True,
+        if "summary-en" in prompt and "LangGraph" in prompt and "DeepAgents" in prompt:
+            summary_path = workspace_root / "blocks" / "summaries" / "summary-en.yml"
+            interrupt = {
+                "id": str(uuid.uuid4()),
+                "value": {
+                    "action_requests": [
+                        {
+                            "name": "edit_block_content",
+                            "args": {
+                                "path": str(summary_path),
+                                "block_id": "summary-en",
+                                "proposed_content": (
+                                    "Software engineer building backend and fullstack systems for "
+                                    "operational automation, commerce workflows, and AI-assisted "
+                                    "products with LangGraph and DeepAgents."
+                                ),
+                            },
+                        }
+                    ]
+                },
             }
-        ).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
-        method="POST",
-    )
-
-    with urllib.request.urlopen(request, timeout=60) as response:
-        for raw_line in response:
-            line = raw_line.decode("utf-8").strip()
-            if not line.startswith("data: "):
-                continue
-            payload = line[6:]
-            if payload == "[DONE]":
-                break
-            chunk = json.loads(payload)
-            delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content")
-            if delta:
-                emit_text_delta(handler, handler.message_id, model, delta)
-
-
-def stream_ollama(handler: BaseHTTPRequestHandler, model_messages: list[dict], model: str) -> None:
-    request = urllib.request.Request(
-        f"{OLLAMA_BASE_URL}/api/chat",
-        data=json.dumps(
-            {
-                "model": model,
-                "messages": model_messages,
-                "stream": True,
+            state = {
+                "status": "interrupted",
+                "values": {"messages": messages},
+                "interrupts": [interrupt],
+                "pending": {
+                    "kind": "edit_summary_block",
+                    "path": str(summary_path),
+                    "content": interrupt["value"]["action_requests"][0]["args"]["proposed_content"],
+                },
             }
-        ).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+            self.save_state(thread_id, state)
+            events.append(("values", append_interrupts(state["values"], state["interrupts"])))
+            return events
 
-    with urllib.request.urlopen(request, timeout=60) as response:
-        for raw_line in response:
-            line = raw_line.decode("utf-8").strip()
-            if not line:
-                continue
-            chunk = json.loads(line)
-            delta = chunk.get("message", {}).get("content")
-            if delta:
-                emit_text_delta(handler, handler.message_id, model, delta)
+        workspace_name = workspace_root.name or "workspace"
+        messages.append(
+            {
+                "id": str(uuid.uuid4()),
+                "type": "ai",
+                "content": (
+                    "Stub DeepAgents runtime active. "
+                    f"I can inspect the current workspace ({workspace_name}) and persist thread state locally."
+                ),
+            }
+        )
+        state = {"status": "idle", "values": {"messages": messages}, "interrupts": [], "pending": None}
+        self.save_state(thread_id, state)
+        events.append(("values", state["values"]))
+        return events
+
+    def resume(
+        self,
+        thread_id: str,
+        command: dict[str, Any],
+        context: dict[str, Any],
+    ) -> list[tuple[str, dict[str, Any]]]:
+        state = self.load_state(thread_id)
+        decisions = serialize(command.get("resume", {}).get("decisions", []))
+        if not decisions:
+            raise ValueError("Missing resume decisions.")
+
+        decision = decisions[0]
+        pending = state.get("pending")
+        if not pending:
+            raise ValueError("No interrupted action is pending for this thread.")
+
+        if decision.get("type") == "reject":
+            state["interrupts"] = []
+            state["pending"] = None
+            state["status"] = "idle"
+            state["values"]["messages"].append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "ai",
+                    "content": "The proposed workspace edit was rejected.",
+                }
+            )
+            self.save_state(thread_id, state)
+            return [("values", state["values"])]
+
+        proposed_content = pending["content"]
+        if decision.get("type") == "edit":
+            edits = decision.get("edited_action") or {}
+            proposed_content = edits.get("proposed_content", proposed_content)
+
+        path = Path(pending["path"])
+        block = load_yaml(path)
+        block["content"] = proposed_content
+        write_yaml(path, block)
+
+        state["interrupts"] = []
+        state["pending"] = None
+        state["status"] = "idle"
+        state["values"]["messages"].append(
+            {
+                "id": str(uuid.uuid4()),
+                "type": "ai",
+                "content": "Approved. I updated the summary-en block in the workspace.",
+            }
+        )
+        self.save_state(thread_id, state)
+        return [("values", state["values"])]
+
+
+class DeepAgentRuntime:
+    def __init__(self, model: str, data_dir: Path) -> None:
+        self.model = model
+        self.data_dir = data_dir
+        self.memory_dir = data_dir / "memories"
+        self.memory_dir.mkdir(parents=True, exist_ok=True)
+        self.memory_file = self.memory_dir / "AGENTS.md"
+        if not self.memory_file.exists():
+            self.memory_file.write_text("", encoding="utf-8")
+
+        self._checkpointer_manager = SqliteSaver.from_conn_string(str(data_dir / "threads.sqlite"))
+        self.checkpointer = self._checkpointer_manager.__enter__()
+        self.agent = create_deep_agent(
+            model=model,
+            backend=self.backend_factory,
+            checkpointer=self.checkpointer,
+            interrupt_on={
+                "write_file": True,
+                "edit_file": True,
+            },
+            memory=["/memories/AGENTS.md"],
+            system_prompt=(
+                "You are Resume Studio's local AI assistant. "
+                "Only edit resume content under /profile, /blocks, and /resumes. "
+                "Do not modify templates, Docker files, or unrelated project files. "
+                "Use /memories/AGENTS.md only for long-term memory."
+            ),
+        )
+
+    def backend_factory(self, runtime: Any) -> CompositeBackend:
+        context = runtime.context or {}
+        workspace_root_value = context.get("workspaceRoot") or ""
+        workspace_root = Path(workspace_root_value).expanduser() if workspace_root_value else None
+        routes = {
+            "/memories/": FilesystemBackend(root_dir=self.memory_dir, virtual_mode=True),
+        }
+        if workspace_root:
+            routes.update(
+                {
+                    "/profile/": FilesystemBackend(root_dir=workspace_root / "profile", virtual_mode=True),
+                    "/blocks/": FilesystemBackend(root_dir=workspace_root / "blocks", virtual_mode=True),
+                    "/resumes/": FilesystemBackend(root_dir=workspace_root / "resumes", virtual_mode=True),
+                }
+            )
+        return CompositeBackend(default=StateBackend(runtime), routes=routes)
+
+    def get_state(self, thread_id: str) -> dict[str, Any]:
+        config = {"configurable": {"thread_id": thread_id}}
+        try:
+            snapshot = self.agent.get_state(config)
+        except Exception:
+            return {"status": "idle", "values": {"messages": []}}
+
+        values = serialize(getattr(snapshot, "values", {}) or {})
+        interrupts = serialize(getattr(snapshot, "interrupts", []) or [])
+        return {
+            "status": "interrupted" if interrupts else "idle",
+            "values": append_interrupts(values, interrupts),
+        }
+
+    def stream(
+        self,
+        thread_id: str,
+        input_value: dict[str, Any] | None,
+        command: dict[str, Any] | None,
+        context: dict[str, Any],
+    ) -> list[tuple[str, dict[str, Any]]]:
+        config = {"configurable": {"thread_id": thread_id}}
+        payload: dict[str, Any] | Command | None = input_value
+        if command is not None:
+            payload = Command(resume=command.get("resume"))
+
+        if payload is None:
+            raise ValueError("Missing input for stream request.")
+
+        events: list[tuple[str, dict[str, Any]]] = []
+        for chunk in self.agent.stream(
+            payload,
+            config=config,
+            context=context,
+            stream_mode="values",
+        ):
+            events.append(("values", serialize(chunk)))
+
+        state = self.get_state(thread_id)
+        events.append(("values", state["values"]))
+        return events
+
+
+class AiService:
+    def __init__(self) -> None:
+        self.model = choose_model()
+        self.provider = provider_from_model(self.model)
+        self.data_dir = Path(os.environ.get("RESUME_STUDIO_AI_DATA_DIR", ".resume-studio-ai")).expanduser()
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.stub = StubRuntime(self.data_dir)
+        self.deep_agent = None if self.model == "stub" else DeepAgentRuntime(self.model, self.data_dir)
+
+    def health(self) -> dict[str, Any]:
+        return {
+            "baseUrl": f"http://{HOST}:{PORT}",
+            "provider": self.provider,
+            "model": self.model,
+            "healthy": True,
+        }
+
+    def get_state(self, thread_id: str) -> dict[str, Any]:
+        if self.deep_agent is None:
+            return self.stub.get_state(thread_id)
+        return self.deep_agent.get_state(thread_id)
+
+    def stream(
+        self,
+        thread_id: str,
+        input_value: dict[str, Any] | None,
+        command: dict[str, Any] | None,
+        context: dict[str, Any],
+    ) -> list[tuple[str, dict[str, Any]]]:
+        if self.deep_agent is None:
+            return self.stub.stream(thread_id, input_value, command, context)
+        return self.deep_agent.stream(thread_id, input_value, command, context)
 
 
 class ResumeStudioHandler(BaseHTTPRequestHandler):
-    server_version = "ResumeStudioAI/0.1"
+    server_version = "ResumeStudioAI/0.2"
     protocol_version = "HTTP/1.1"
+
+    @property
+    def service(self) -> AiService:
+        return self.server.service  # type: ignore[attr-defined]
 
     def do_OPTIONS(self) -> None:
         self.send_response(204)
@@ -265,64 +433,48 @@ class ResumeStudioHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
-        if self.path != "/health":
-            json_headers(self, 404)
-            self.wfile.write(json.dumps({"error": "Not found"}).encode("utf-8"))
+        if self.path == "/health":
+            json_headers(self)
+            self.wfile.write(json.dumps(self.service.health()).encode("utf-8"))
             return
 
-        json_headers(self)
-        self.wfile.write(
-            json.dumps(
-                {
-                    "baseUrl": f"http://{HOST}:{PORT}",
-                    "provider": choose_provider(),
-                    "healthy": True,
-                }
-            ).encode("utf-8")
-        )
+        if self.path.startswith("/threads/") and self.path.endswith("/state"):
+            thread_id = unquote(self.path[len("/threads/") : -len("/state")]).strip("/")
+            json_headers(self)
+            self.wfile.write(json.dumps(self.service.get_state(thread_id)).encode("utf-8"))
+            return
+
+        json_headers(self, 404)
+        self.wfile.write(json.dumps({"error": "Not found"}).encode("utf-8"))
 
     def do_POST(self) -> None:
-        if self.path != "/chat":
+        if self.path != "/stream":
             json_headers(self, 404)
             self.wfile.write(json.dumps({"error": "Not found"}).encode("utf-8"))
             return
 
-        body = read_json(self)
-        messages = body.get("messages", [])
-        data = body.get("data", {})
-        context = data.get("context", {})
-        provider = data.get("provider") or choose_provider()
-        model = (
-            data.get("model")
-            or (OPENAI_MODEL if provider == "openai" else OLLAMA_MODEL if provider == "ollama" else "local-stub")
-        )
-
-        self.message_id = str(uuid.uuid4())
-        run_id = str(uuid.uuid4())
-        model_messages = to_model_messages(messages, context)
-
-        sse_headers(self)
-        emit_run_started(self, run_id, model)
-        emit_text_start(self, self.message_id, model)
-
         try:
-            if provider == "openai":
-                stream_openai(self, model_messages, model)
-            elif provider == "ollama":
-                stream_ollama(self, model_messages, model)
-            else:
-                stream_stub(self, model_messages, model)
-            emit_text_end(self, self.message_id, model)
-            emit_run_finished(self, run_id, model)
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, RuntimeError, json.JSONDecodeError) as error:
-            emit_run_error(self, run_id, model, str(error))
+            body = read_json(self)
+            config = body.get("config", {})
+            configurable = config.get("configurable", {})
+            thread_id = configurable.get("thread_id") or str(uuid.uuid4())
+            context = serialize(body.get("context", {}) or {})
+            events = self.service.stream(thread_id, body.get("input"), body.get("command"), context)
 
-    def log_message(self, format: str, *args) -> None:
+            sse_headers(self)
+            for event_name, payload in events:
+                write_sse(self, event_name, payload)
+        except Exception as error:  # noqa: BLE001
+            sse_headers(self)
+            write_sse(self, "error", {"message": str(error)})
+
+    def log_message(self, format: str, *args) -> None:  # noqa: A003
         return
 
 
 def main() -> None:
     server = ThreadingHTTPServer((HOST, PORT), ResumeStudioHandler)
+    server.service = AiService()  # type: ignore[attr-defined]
     server.serve_forever()
 
 

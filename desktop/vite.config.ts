@@ -4,6 +4,11 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      "__vite-optional-peer-dep:@langchain/core/messages:@langchain/langgraph-sdk:false": "@langchain/core/messages"
+    }
+  },
   clearScreen: false,
   server: {
     port: 1420,

@@ -126,5 +126,6 @@ pub struct LlmTaskResult {
 pub struct AiServiceStatus {
     pub base_url: String,
     pub provider: String,
+    pub model: String,
     pub healthy: bool,
 }

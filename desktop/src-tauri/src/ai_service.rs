@@ -1,16 +1,20 @@
 use crate::app_state::{AiServiceHandle, AppState};
 use crate::domain::AiServiceStatus;
+use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 const HOST: &str = "127.0.0.1";
 
-pub fn ensure_started(state: &State<'_, AppState>) -> Result<AiServiceStatus, String> {
+pub fn ensure_started(
+    state: &State<'_, AppState>,
+    app: &AppHandle,
+) -> Result<AiServiceStatus, String> {
     let mut guard = state
         .ai_service
         .lock()
@@ -31,9 +35,17 @@ pub fn ensure_started(state: &State<'_, AppState>) -> Result<AiServiceStatus, St
     let port = reserve_port()?;
     let script_path = python_script_path()?;
     let python = resolve_python_binary()?;
+    let data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("Failed to resolve AI sidecar data directory: {error}"))?
+        .join("ai-service");
+    fs::create_dir_all(&data_dir)
+        .map_err(|error| format!("Failed to prepare AI sidecar data directory: {error}"))?;
     let mut child = Command::new(python)
         .arg(script_path)
         .env("RESUME_STUDIO_AI_PORT", port.to_string())
+        .env("RESUME_STUDIO_AI_DATA_DIR", data_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -63,6 +75,10 @@ fn reserve_port() -> Result<u16, String> {
 }
 
 fn resolve_python_binary() -> Result<String, String> {
+    if let Ok(path) = venv_python_path() {
+        return Ok(path.display().to_string());
+    }
+
     for candidate in ["python3", "python"] {
         if which::which(candidate).is_ok() {
             return Ok(candidate.to_string());
@@ -70,6 +86,23 @@ fn resolve_python_binary() -> Result<String, String> {
     }
 
     Err("Python 3 is required to run the AI sidecar.".to_string())
+}
+
+fn venv_python_path() -> Result<PathBuf, String> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let python = manifest_dir
+        .parent()
+        .ok_or_else(|| "Failed to resolve desktop root.".to_string())?
+        .join("ai_service")
+        .join(".venv")
+        .join("bin")
+        .join("python");
+
+    if python.is_file() {
+        Ok(python)
+    } else {
+        Err("AI sidecar virtualenv not found.".to_string())
+    }
 }
 
 fn python_script_path() -> Result<PathBuf, String> {

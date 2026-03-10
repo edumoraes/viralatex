@@ -7,6 +7,7 @@ const invokeMock = vi.fn(async (command: string) => {
     return {
       baseUrl: "http://127.0.0.1:8765",
       provider: "stub",
+      model: "stub",
       healthy: true
     };
   }
@@ -18,42 +19,46 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: invokeMock
 }));
 
-vi.mock("@tanstack/ai-client", () => ({
-  fetchServerSentEvents: vi.fn(() => ({ connect: vi.fn() }))
-}));
-
-vi.mock("@tanstack/ai-react", async () => {
+vi.mock("@langchain/langgraph-sdk/react", async () => {
   const React = await import("react");
 
+  class FetchStreamTransport {}
+
   return {
-    useChat: () => {
-      const [messages, setMessages] = React.useState<
-        Array<{ id: string; role: "user" | "assistant"; parts: Array<{ type: "text"; content: string }> }>
-      >([]);
+    FetchStreamTransport,
+    useStream: ({ onThreadId }: { onThreadId?: (threadId: string) => void }) => {
+      const [messages, setMessages] = React.useState<Array<{ id: string; type: string; content: string }>>([]);
       const [isLoading, setIsLoading] = React.useState(false);
-      const [status, setStatus] = React.useState("ready");
+      const [interrupts, setInterrupts] = React.useState<Array<unknown>>([]);
 
       return {
         messages,
-        error: null,
         isLoading,
-        status,
-        clear: () => setMessages([]),
-        stop: () => {
+        interrupts,
+        interrupt: interrupts[0],
+        error: null,
+        stop: async () => {
           setIsLoading(false);
-          setStatus("ready");
         },
-        sendMessage: async (prompt: string) => {
+        submit: async (values: { messages?: Array<{ id: string; type: string; content: string }> } | null, options?: { command?: unknown }) => {
+          if (options?.command) {
+            setInterrupts([]);
+            setMessages((current) => [
+              ...current,
+              {
+                id: `assistant-${current.length}`,
+                type: "ai",
+                content: "Approved. I updated the summary-en block in the workspace."
+              }
+            ]);
+            return;
+          }
+
           setIsLoading(true);
-          setStatus("streaming");
-          setMessages((current) => [
-            ...current,
-            {
-              id: `user-${current.length}`,
-              role: "user",
-              parts: [{ type: "text", content: prompt }]
-            }
-          ]);
+          onThreadId?.("thread-test");
+          if (values?.messages?.length) {
+            setMessages((current) => [...current, ...(values.messages ?? [])]);
+          }
 
           await new Promise((resolve) => setTimeout(resolve, 25));
 
@@ -61,13 +66,20 @@ vi.mock("@tanstack/ai-react", async () => {
             ...current,
             {
               id: `assistant-${current.length}`,
-              role: "assistant",
-              parts: [{ type: "text", content: "Stub provider active." }]
+              type: "ai",
+              content: "Stub DeepAgents runtime active."
             }
           ]);
           setIsLoading(false);
-          setStatus("ready");
-        }
+        },
+        toolCalls: [],
+        getToolCalls: () => [],
+        subagents: new Map(),
+        activeSubagents: [],
+        getSubagent: () => undefined,
+        getSubagentsByType: () => [],
+        getSubagentsByMessage: () => [],
+        values: { messages },
       };
     }
   };
@@ -76,6 +88,19 @@ vi.mock("@tanstack/ai-react", async () => {
 describe("App chat flow", () => {
   beforeEach(() => {
     invokeMock.mockClear();
+    const store = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          store.set(key, value);
+        },
+        removeItem: (key: string) => {
+          store.delete(key);
+        }
+      }
+    });
   });
 
   it("leaves streaming and allows another prompt without stop", async () => {

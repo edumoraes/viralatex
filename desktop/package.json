@@ -14,6 +14,8 @@
     "tauri:build": "tauri build"
   },
   "dependencies": {
+    "@langchain/core": "^1.1.31",
+    "@langchain/langgraph-sdk": "^1.6.5",
     "@tanstack/ai-client": "0.5.3",
     "@tanstack/ai-react": "0.6.3",
     "@tauri-apps/api": "^2.3.0",
