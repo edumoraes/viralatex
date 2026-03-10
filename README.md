@@ -61,7 +61,7 @@ src/
 
 - Node.js + npm
 - Rust toolchain
-- bundled `tectonic` binary in `desktop/src-tauri/binaries/tectonic`, or a custom path via `TECTONIC_BIN`
+- managed `tectonic` binary in `desktop/src-tauri/binaries/tectonic`, or a custom path via `TECTONIC_BIN`
 
 ### Bootstrap commands
 
@@ -71,13 +71,41 @@ npm install
 npm run tauri:dev
 ```
 
-To use a specific `tectonic` binary:
+Before rendering resumes, install or register a local `tectonic` binary for the desktop app:
+
+```bash
+bin/setup-tectonic
+```
+
+The installer works in three modes:
+
+1. `bin/setup-tectonic /path/to/tectonic`
+2. `TECTONIC_BIN=/path/to/tectonic bin/setup-tectonic`
+3. `bin/setup-tectonic`
+   On Linux x64, this will try the local `PATH` first and then download `tectonic` via the official installer if it is still missing.
+
+If `tectonic` is already in your `PATH`, you can also run:
+
+```bash
+make tectonic-setup
+```
+
+To use a specific `tectonic` binary without copying it into the managed location:
 
 ```bash
 TECTONIC_BIN=/path/to/tectonic npm run tauri:dev
 ```
 
-The bootstrap already supports a bundled local binary at `desktop/src-tauri/binaries/tectonic`, which is the preferred model for future app distribution.
+The desktop app resolves `tectonic` in this order:
+
+1. `TECTONIC_BIN`
+2. `desktop/src-tauri/binaries/tectonic`
+3. bundled app resource path for packaged builds
+4. `tectonic` from `PATH`
+
+The managed local binary at `desktop/src-tauri/binaries/tectonic` is the preferred path for Linux development and future app packaging.
+
+Both `npm --prefix desktop run tauri:dev` and `npm --prefix desktop run tauri:build` now fail early with an actionable message if `tectonic` is unavailable.
 
 ## Local quality workflow
 
@@ -96,6 +124,7 @@ Install the local workflow:
 npm --prefix desktop install
 cargo install cargo-audit
 pipx install pre-commit
+make tectonic-setup TECTONIC_BIN=/path/to/tectonic
 make hooks-install
 ```
 
@@ -111,7 +140,7 @@ make hooks-run
 Hook behavior:
 
 - `pre-commit`: file hygiene, YAML/JSON/TOML validation, secret detection, shell checks, frontend lint, Rust formatting, and Rust clippy
-- `pre-push`: `make test`, `npm --prefix desktop run build`, and `cargo test --manifest-path desktop/src-tauri/Cargo.toml`
+- `pre-push`: `make test`, renderer and sidecar regression tests, `npm --prefix desktop run build`, and `cargo test --manifest-path desktop/src-tauri/Cargo.toml`
 
 The app creates or opens a local workspace, edits profile, blocks, and resume definitions through structured forms, persists render history inside the workspace, and renders PDFs into the workspace `renders/` directory.
 
