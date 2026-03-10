@@ -84,6 +84,16 @@ type AiServiceStatus = {
   healthy: boolean;
 };
 
+type AiProviderConfig = {
+  provider: string;
+  hasApiKey: boolean;
+};
+
+type AiProviderConfigInput = {
+  provider: string;
+  apiKey?: string;
+};
+
 type ChatMessage = {
   id?: string;
   type: string;
@@ -115,6 +125,8 @@ type ChatContext = {
 
 type ChatSurfaceProps = {
   aiService: AiServiceStatus;
+  providerConfig: AiProviderConfig;
+  onApplyProviderConfig: (config: AiProviderConfigInput) => Promise<void>;
   context: ChatContext;
   busy: boolean;
   onBusyChange: (busy: boolean) => void;
@@ -143,6 +155,14 @@ async function renderResume(resumeId: string): Promise<RenderResult> {
 
 async function ensureAiServiceStarted(): Promise<AiServiceStatus> {
   return invoke("ensure_ai_service_started");
+}
+
+async function loadAiProviderConfig(): Promise<AiProviderConfig> {
+  return invoke("load_ai_provider_config");
+}
+
+async function updateAiProviderConfig(config: AiProviderConfigInput): Promise<AiServiceStatus> {
+  return invoke("update_ai_provider_config", { config });
 }
 
 async function fetchThreadState(baseUrl: string, threadId: string): Promise<{ status: string; values: ChatState }> {
@@ -174,11 +194,21 @@ function renderMessageText(message: ChatMessage): string {
   return "";
 }
 
-function ChatSurface({ aiService, context, busy, onBusyChange, onError }: ChatSurfaceProps) {
+function ChatSurface({
+  aiService,
+  providerConfig,
+  onApplyProviderConfig,
+  context,
+  busy,
+  onBusyChange,
+  onError
+}: ChatSurfaceProps) {
   const [prompt, setPrompt] = useState("");
   const [threadId, setThreadId] = useState<string | null>(() => localStorage.getItem("resume-studio-ai-thread-id"));
   const [initialValues, setInitialValues] = useState<ChatState | null>(null);
   const [editedContent, setEditedContent] = useState("");
+  const [selectedProvider, setSelectedProvider] = useState(providerConfig.provider);
+  const [apiKey, setApiKey] = useState("");
 
   const transport = useMemo(
     () =>
@@ -235,6 +265,11 @@ function ChatSurface({ aiService, context, busy, onBusyChange, onError }: ChatSu
   useEffect(() => {
     setEditedContent(proposedContent);
   }, [proposedContent]);
+
+  useEffect(() => {
+    setSelectedProvider(providerConfig.provider);
+    setApiKey("");
+  }, [providerConfig]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -307,8 +342,22 @@ function ChatSurface({ aiService, context, busy, onBusyChange, onError }: ChatSu
     setEditedContent("");
   }
 
+  async function handleApplyProviderConfig() {
+    try {
+      await onApplyProviderConfig({
+        provider: selectedProvider,
+        apiKey: apiKey.trim() || undefined
+      });
+      setApiKey("");
+      handleNewThread();
+    } catch (reason) {
+      onError(String(reason));
+    }
+  }
+
   const status = stream.isLoading ? "streaming" : interrupts.length > 0 ? "interrupted" : "ready";
   const messages = stream.messages as ChatMessage[];
+  const requiresApiKey = selectedProvider === "openai" || selectedProvider === "anthropic";
 
   return (
     <article className="panel chat-panel">
@@ -322,6 +371,46 @@ function ChatSurface({ aiService, context, busy, onBusyChange, onError }: ChatSu
           <span className="chip">{aiService.model}</span>
           <span className="hint">State: {status}</span>
         </div>
+      </div>
+
+      <div className="provider-config">
+        <div className="provider-config-row">
+          <label htmlFor="providerSelect">AI provider</label>
+          <select id="providerSelect" value={selectedProvider} disabled={busy} onChange={(event) => setSelectedProvider(event.target.value)}>
+            <option value="stub">Stub</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="ollama">Ollama</option>
+          </select>
+          <button
+            className="secondary"
+            type="button"
+            disabled={
+              busy ||
+              (requiresApiKey &&
+                !apiKey.trim() &&
+                !(selectedProvider === providerConfig.provider && providerConfig.hasApiKey))
+            }
+            onClick={() => void handleApplyProviderConfig()}
+          >
+            Apply provider
+          </button>
+        </div>
+        {requiresApiKey ? (
+          <div className="provider-config-row">
+            <label htmlFor="providerApiKey">Provider API key</label>
+            <input
+              id="providerApiKey"
+              type="password"
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder={providerConfig.hasApiKey && selectedProvider === providerConfig.provider ? "Saved key is configured. Enter a new one to replace it." : "Paste the API key for the selected provider."}
+              disabled={busy}
+            />
+          </div>
+        ) : (
+          <p className="hint">Ollama and stub run without an API key.</p>
+        )}
       </div>
 
       <div className="chat-thread">
@@ -405,6 +494,10 @@ export default function App() {
   const [selectedResumeId, setSelectedResumeId] = useState("");
   const [renderResult, setRenderResult] = useState<RenderResult | null>(null);
   const [aiService, setAiService] = useState<AiServiceStatus | null>(null);
+  const [providerConfig, setProviderConfig] = useState<AiProviderConfig>({
+    provider: "stub",
+    hasApiKey: false
+  });
   const [message, setMessage] = useState("Open a workspace or create a sample workspace.");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -434,10 +527,31 @@ export default function App() {
 
   async function startAiService() {
     try {
-      const status = await ensureAiServiceStarted();
+      const [config, status] = await Promise.all([loadAiProviderConfig(), ensureAiServiceStarted()]);
+      setProviderConfig(config);
       setAiService(status);
     } catch (reason) {
       setError(String(reason));
+    }
+  }
+
+  async function handleApplyProviderConfig(config: AiProviderConfigInput) {
+    setBusy(true);
+    setError("");
+    try {
+      const status = await updateAiProviderConfig(config);
+      setProviderConfig({
+        provider: config.provider,
+        hasApiKey: Boolean(config.apiKey?.trim()) || (config.provider === providerConfig.provider && providerConfig.hasApiKey)
+      });
+      localStorage.removeItem("resume-studio-ai-thread-id");
+      setAiService(status);
+      setMessage(`AI provider updated to ${status.provider}.`);
+    } catch (reason) {
+      setError(String(reason));
+      throw reason;
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -646,8 +760,10 @@ export default function App() {
 
       {aiService ? (
         <ChatSurface
-          key={aiService.baseUrl}
+          key={`${aiService.baseUrl}:${aiService.provider}:${aiService.model}`}
           aiService={aiService}
+          providerConfig={providerConfig}
+          onApplyProviderConfig={handleApplyProviderConfig}
           context={chatContext}
           busy={busy}
           onBusyChange={setBusy}

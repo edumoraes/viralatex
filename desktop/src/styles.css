@@ -223,6 +223,27 @@ button.chip {
   padding-bottom: 1.5rem;
 }
 
+.provider-config {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 18px;
+  background: rgba(244, 239, 228, 0.04);
+}
+
+.provider-config-row {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.provider-config-row label {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(244, 239, 228, 0.56);
+}
+
 .chat-thread {
   display: grid;
   gap: 0.9rem;

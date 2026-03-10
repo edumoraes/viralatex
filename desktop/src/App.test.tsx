@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const invokeMock = vi.fn(async (command: string) => {
   if (command === "ensure_ai_service_started") {
@@ -8,6 +8,22 @@ const invokeMock = vi.fn(async (command: string) => {
       baseUrl: "http://127.0.0.1:8765",
       provider: "stub",
       model: "stub",
+      healthy: true
+    };
+  }
+
+  if (command === "load_ai_provider_config") {
+    return {
+      provider: "stub",
+      hasApiKey: false
+    };
+  }
+
+  if (command === "update_ai_provider_config") {
+    return {
+      baseUrl: "http://127.0.0.1:8765",
+      provider: "openai",
+      model: "openai:gpt-4o-mini",
       healthy: true
     };
   }
@@ -86,9 +102,25 @@ vi.mock("@langchain/langgraph-sdk/react", async () => {
 });
 
 describe("App chat flow", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   beforeEach(() => {
     invokeMock.mockClear();
     const store = new Map<string, string>();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          status: "idle",
+          values: {
+            messages: []
+          }
+        })
+      }))
+    );
     Object.defineProperty(window, "localStorage", {
       configurable: true,
       value: {
@@ -130,5 +162,31 @@ describe("App chat flow", () => {
     await waitFor(() => {
       expect(screen.getAllByText("State: ready")[0]).toBeInTheDocument();
     });
+  });
+
+  it("shows provider controls and applies a remote provider config", async () => {
+    const { default: App } = await import("./App");
+    render(<App />);
+
+    expect(await screen.findByLabelText("AI provider")).toHaveValue("stub");
+    expect(screen.queryByLabelText("Provider API key")).not.toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText("AI provider"), "openai");
+    expect(screen.getByLabelText("Provider API key")).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText("Provider API key"), "sk-test"); // pragma: allowlist secret
+    await userEvent.click(screen.getAllByRole("button", { name: "Apply provider" })[0]);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("update_ai_provider_config", {
+        config: {
+          provider: "openai",
+          apiKey: "sk-test" // pragma: allowlist secret
+        }
+      });
+    });
+
+    expect((await screen.findAllByText("openai")).length).toBeGreaterThan(0);
+    expect(screen.getByText("openai:gpt-4o-mini")).toBeInTheDocument();
   });
 });

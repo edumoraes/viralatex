@@ -7,8 +7,9 @@ mod workspace;
 
 use app_state::AppState;
 use domain::{
-    AiServiceStatus, AppWorkspaceState, Block, LlmTaskRequest, LlmTaskResult, Profile,
-    RenderResult, ResumeDefinition, WorkspaceSnapshot, WorkspaceSummary,
+    AiProviderConfig, AiProviderConfigInput, AiServiceStatus, AppWorkspaceState, Block,
+    LlmTaskRequest, LlmTaskResult, Profile, RenderResult, ResumeDefinition, WorkspaceSnapshot,
+    WorkspaceSummary,
 };
 use std::path::{Path, PathBuf};
 use tauri::{Manager, State};
@@ -193,6 +194,20 @@ fn ensure_ai_service_started(
     ai_service::ensure_started(&state, &app)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+fn load_ai_provider_config(app: tauri::AppHandle) -> Result<AiProviderConfig, String> {
+    ai_service::load_config(&app)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn update_ai_provider_config(
+    config: AiProviderConfigInput,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<AiServiceStatus, String> {
+    ai_service::update_config(&state, &app, config)
+}
+
 fn selected_workspace_root(state: &State<'_, AppState>) -> Result<PathBuf, String> {
     let guard = state
         .selected_workspace
@@ -237,7 +252,9 @@ pub fn run() {
             list_render_history,
             render_resume,
             run_llm_task,
-            ensure_ai_service_started
+            ensure_ai_service_started,
+            load_ai_provider_config,
+            update_ai_provider_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

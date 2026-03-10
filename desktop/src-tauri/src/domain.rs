@@ -129,3 +129,18 @@ pub struct AiServiceStatus {
     pub model: String,
     pub healthy: bool,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiProviderConfig {
+    pub provider: String,
+    #[serde(default)]
+    pub has_api_key: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiProviderConfigInput {
+    pub provider: String,
+    pub api_key: Option<String>,
+}

@@ -104,9 +104,14 @@ Desktop AI sidecar details:
 
 - The desktop app starts `desktop/ai_service/server.py` through Tauri and probes `GET /health` before enabling chat usage.
 - The Rust launcher prefers `desktop/ai_service/.venv/bin/python` and falls back to `python3` or `python` from `PATH`.
+- AI provider configuration is app-local, not workspace-local. Tauri persists the selected provider and optional API key under the app-local AI service directory and restarts the sidecar when the user applies a new provider from the chat UI.
+- The supported chat providers are `openai`, `anthropic`, `ollama`, and `stub`. The desktop app currently maps them to default model strings and does not expose free-form model selection in the UI.
+- Remote providers require an API key in the chat provider controls. `ollama` and `stub` do not require one.
 - The sidecar stores app-local runtime state outside the workspace, including provider-backed checkpoints in `threads.sqlite` and long-term memory in `memories/AGENTS.md`.
+- The sidecar resolves provider and model from explicit startup environment when available, and falls back to `stub` when no valid provider-backed configuration is present.
 - When no provider-backed model is configured, the sidecar falls back to a stub runtime that preserves the same thread and interrupt contract for development.
 - The React chat uses LangGraph thread streaming, rehydrates prior thread state from `/threads/<id>/state`, and persists the current thread id in `localStorage`.
+- Applying a provider change from the chat UI resets the current thread id so thread state does not mix across providers.
 - Agent-proposed workspace writes must go through interrupt-based approval in the UI before mutating files under `/profile`, `/blocks`, or `/resumes`.
 
 ## Coding Style & Naming Conventions
@@ -147,6 +152,7 @@ Desktop testing conventions:
 - Follow TDD for desktop and renderer changes too, not only for the LaTeX layer.
 - For frontend regressions, prefer Vitest with Testing Library and focused mocked boundaries over broad end-to-end scaffolding.
 - For AI sidecar behavior, prefer Python stdlib `unittest` with real local HTTP interaction against the sidecar process.
+- Provider selection changes should be covered in both frontend tests and backend-side tests: frontend for the chat controls and restart flow, Rust for config persistence and provider env wiring, and Python for provider/model resolution in the sidecar.
 - For agent-thread changes, cover thread rehydration, interrupt handling, and mutation approval or rejection flows.
 - For renderer/toolchain resolution, prefer Rust unit tests that isolate path resolution and failure reporting.
 - Do not introduce changes to the renderer, sidecar, or Tauri command flow without automated regression coverage first, unless the user explicitly asks otherwise.

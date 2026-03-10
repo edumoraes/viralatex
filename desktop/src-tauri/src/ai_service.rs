@@ -1,15 +1,31 @@
 use crate::app_state::{AiServiceHandle, AppState};
-use crate::domain::AiServiceStatus;
+use crate::domain::{AiProviderConfig, AiProviderConfigInput, AiServiceStatus};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, State};
 
 const HOST: &str = "127.0.0.1";
+const CONFIG_FILE: &str = "config.yml";
+const OPENAI_PROVIDER: &str = "openai";
+const ANTHROPIC_PROVIDER: &str = "anthropic";
+const OLLAMA_PROVIDER: &str = "ollama";
+const STUB_PROVIDER: &str = "stub";
+const DEFAULT_OPENAI_MODEL: &str = "openai:gpt-4o-mini";
+const DEFAULT_ANTHROPIC_MODEL: &str = "anthropic:claude-3-5-haiku-latest";
+const DEFAULT_OLLAMA_MODEL: &str = "ollama:llama3.2";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredAiProviderConfig {
+    provider: String,
+    #[serde(default)]
+    api_key: Option<String>,
+}
 
 pub fn ensure_started(
     state: &State<'_, AppState>,
@@ -35,20 +51,19 @@ pub fn ensure_started(
     let port = reserve_port()?;
     let script_path = python_script_path()?;
     let python = resolve_python_binary()?;
-    let data_dir = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|error| format!("Failed to resolve AI sidecar data directory: {error}"))?
-        .join("ai-service");
-    fs::create_dir_all(&data_dir)
-        .map_err(|error| format!("Failed to prepare AI sidecar data directory: {error}"))?;
-    let mut child = Command::new(python)
+    let data_dir = ai_service_data_dir(app)?;
+    let config = load_stored_config(&config_path(app)?)?.unwrap_or_else(default_stored_config);
+    let mut command = Command::new(python);
+    command
         .arg(script_path)
         .env("RESUME_STUDIO_AI_PORT", port.to_string())
-        .env("RESUME_STUDIO_AI_DATA_DIR", data_dir)
+        .env("RESUME_STUDIO_AI_DATA_DIR", &data_dir)
+        .env("RESUME_STUDIO_AI_PROVIDER", &config.provider)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    apply_provider_env(&mut command, &config);
+    let mut child = command
         .spawn()
         .map_err(|error| format!("Failed to start AI sidecar: {error}"))?;
 
@@ -61,6 +76,39 @@ pub fn ensure_started(
 
     *guard = Some(AiServiceHandle { port, child });
     health_check(port)
+}
+
+pub fn load_config(app: &AppHandle) -> Result<AiProviderConfig, String> {
+    let stored = load_stored_config(&config_path(app)?)?.unwrap_or_else(default_stored_config);
+    Ok(mask_config(&stored))
+}
+
+pub fn update_config(
+    state: &State<'_, AppState>,
+    app: &AppHandle,
+    input: AiProviderConfigInput,
+) -> Result<AiServiceStatus, String> {
+    let path = config_path(app)?;
+    let existing = load_stored_config(&path)?;
+    let stored = normalize_config(input, existing.as_ref())?;
+    write_stored_config(&path, &stored)?;
+    stop_running_service(state)?;
+    ensure_started(state, app)
+}
+
+fn stop_running_service(state: &State<'_, AppState>) -> Result<(), String> {
+    let mut guard = state
+        .ai_service
+        .lock()
+        .map_err(|_| "Failed to lock AI service state.".to_string())?;
+
+    if let Some(handle) = guard.as_mut() {
+        let _ = handle.child.kill();
+        let _ = handle.child.wait();
+    }
+
+    *guard = None;
+    Ok(())
 }
 
 fn reserve_port() -> Result<u16, String> {
@@ -123,6 +171,151 @@ fn python_script_path() -> Result<PathBuf, String> {
     }
 }
 
+fn ai_service_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("Failed to resolve AI sidecar data directory: {error}"))?
+        .join("ai-service");
+    fs::create_dir_all(&data_dir)
+        .map_err(|error| format!("Failed to prepare AI sidecar data directory: {error}"))?;
+    Ok(data_dir)
+}
+
+fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(ai_service_data_dir(app)?.join(CONFIG_FILE))
+}
+
+fn load_stored_config(path: &Path) -> Result<Option<StoredAiProviderConfig>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let raw = fs::read_to_string(path).map_err(|error| {
+        format!(
+            "Failed to read AI provider config {}: {error}",
+            path.display()
+        )
+    })?;
+    serde_yaml::from_str(&raw).map(Some).map_err(|error| {
+        format!(
+            "Failed to parse AI provider config {}: {error}",
+            path.display()
+        )
+    })
+}
+
+fn write_stored_config(path: &Path, config: &StoredAiProviderConfig) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to create directory {}: {error}", parent.display()))?;
+    }
+
+    let body = serde_yaml::to_string(config).map_err(|error| {
+        format!(
+            "Failed to serialize AI provider config for {}: {error}",
+            path.display()
+        )
+    })?;
+    fs::write(path, body).map_err(|error| {
+        format!(
+            "Failed to write AI provider config {}: {error}",
+            path.display()
+        )
+    })
+}
+
+fn default_stored_config() -> StoredAiProviderConfig {
+    StoredAiProviderConfig {
+        provider: STUB_PROVIDER.to_string(),
+        api_key: None,
+    }
+}
+
+fn mask_config(config: &StoredAiProviderConfig) -> AiProviderConfig {
+    AiProviderConfig {
+        provider: config.provider.clone(),
+        has_api_key: config
+            .api_key
+            .as_ref()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false),
+    }
+}
+
+fn normalize_config(
+    input: AiProviderConfigInput,
+    existing: Option<&StoredAiProviderConfig>,
+) -> Result<StoredAiProviderConfig, String> {
+    let provider = normalize_provider(&input.provider)?;
+    let api_key = input
+        .api_key
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            existing
+                .filter(|config| config.provider == provider)
+                .and_then(|config| config.api_key.clone())
+        });
+
+    if requires_api_key(&provider) && api_key.is_none() {
+        return Err(format!("Provider {provider} requires an API key."));
+    }
+
+    Ok(StoredAiProviderConfig { provider, api_key })
+}
+
+fn normalize_provider(provider: &str) -> Result<String, String> {
+    let normalized = provider.trim().to_lowercase();
+    if matches!(
+        normalized.as_str(),
+        OPENAI_PROVIDER | ANTHROPIC_PROVIDER | OLLAMA_PROVIDER | STUB_PROVIDER
+    ) {
+        Ok(normalized)
+    } else {
+        Err(format!("Unsupported AI provider: {provider}"))
+    }
+}
+
+fn requires_api_key(provider: &str) -> bool {
+    matches!(provider, OPENAI_PROVIDER | ANTHROPIC_PROVIDER)
+}
+
+fn default_model_for_provider(provider: &str) -> &'static str {
+    match provider {
+        OPENAI_PROVIDER => DEFAULT_OPENAI_MODEL,
+        ANTHROPIC_PROVIDER => DEFAULT_ANTHROPIC_MODEL,
+        OLLAMA_PROVIDER => DEFAULT_OLLAMA_MODEL,
+        _ => STUB_PROVIDER,
+    }
+}
+
+fn apply_provider_env(command: &mut Command, config: &StoredAiProviderConfig) {
+    command.env_remove("OPENAI_API_KEY");
+    command.env_remove("ANTHROPIC_API_KEY");
+    command.env_remove("OLLAMA_BASE_URL");
+    command.env_remove("OLLAMA_MODEL");
+    command.env(
+        "RESUME_STUDIO_AI_MODEL",
+        default_model_for_provider(&config.provider),
+    );
+
+    match config.provider.as_str() {
+        OPENAI_PROVIDER => {
+            if let Some(api_key) = config.api_key.as_ref() {
+                command.env("OPENAI_API_KEY", api_key);
+            }
+        }
+        ANTHROPIC_PROVIDER => {
+            if let Some(api_key) = config.api_key.as_ref() {
+                command.env("ANTHROPIC_API_KEY", api_key);
+            }
+        }
+        OLLAMA_PROVIDER | STUB_PROVIDER => {}
+        _ => {}
+    }
+}
+
 fn wait_for_health(port: u16) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut last_error = String::from("AI service did not become healthy.");
@@ -167,4 +360,91 @@ fn health_check(port: u16) -> Result<AiServiceStatus, String> {
 
     serde_json::from_str(body)
         .map_err(|error| format!("Failed to parse AI sidecar health response: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn stored_config_roundtrips_and_masks_api_key() {
+        let temp = tempdir().expect("tempdir should exist");
+        let path = temp.path().join("config.yml");
+        let config = StoredAiProviderConfig {
+            provider: OPENAI_PROVIDER.to_string(),
+            api_key: Some("secret".to_string()),
+        };
+
+        write_stored_config(&path, &config).expect("config should be written");
+        let loaded = load_stored_config(&path)
+            .expect("config should load")
+            .expect("config should exist");
+
+        assert_eq!(loaded.provider, OPENAI_PROVIDER);
+        assert!(mask_config(&loaded).has_api_key);
+    }
+
+    #[test]
+    fn normalize_config_requires_api_key_for_remote_provider() {
+        let error = normalize_config(
+            AiProviderConfigInput {
+                provider: OPENAI_PROVIDER.to_string(),
+                api_key: None,
+            },
+            None,
+        )
+        .expect_err("openai without key should fail");
+
+        assert!(error.contains("requires an API key"));
+    }
+
+    #[test]
+    fn normalize_config_accepts_ollama_without_api_key() {
+        let config = normalize_config(
+            AiProviderConfigInput {
+                provider: OLLAMA_PROVIDER.to_string(),
+                api_key: None,
+            },
+            None,
+        )
+        .expect("ollama config should be valid");
+
+        assert_eq!(config.provider, OLLAMA_PROVIDER);
+        assert_eq!(config.api_key, None);
+    }
+
+    #[test]
+    fn default_model_matches_each_provider() {
+        assert_eq!(
+            default_model_for_provider(OPENAI_PROVIDER),
+            DEFAULT_OPENAI_MODEL
+        );
+        assert_eq!(
+            default_model_for_provider(ANTHROPIC_PROVIDER),
+            DEFAULT_ANTHROPIC_MODEL
+        );
+        assert_eq!(
+            default_model_for_provider(OLLAMA_PROVIDER),
+            DEFAULT_OLLAMA_MODEL
+        );
+        assert_eq!(default_model_for_provider(STUB_PROVIDER), STUB_PROVIDER);
+    }
+
+    #[test]
+    fn normalize_config_reuses_existing_api_key_for_same_provider() {
+        let config = normalize_config(
+            AiProviderConfigInput {
+                provider: OPENAI_PROVIDER.to_string(),
+                api_key: None,
+            },
+            Some(&StoredAiProviderConfig {
+                provider: OPENAI_PROVIDER.to_string(),
+                api_key: Some("secret".to_string()),
+            }),
+        )
+        .expect("existing key should be reused");
+
+        assert_eq!(config.api_key.as_deref(), Some("secret"));
+    }
 }

@@ -12,26 +12,54 @@ from typing import Any
 from urllib.parse import unquote
 
 import yaml
-from deepagents import create_deep_agent
-from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
-from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.types import Command
+
+try:
+    from deepagents import create_deep_agent
+    from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    from langgraph.types import Command
+except ModuleNotFoundError:
+    create_deep_agent = None
+    CompositeBackend = FilesystemBackend = StateBackend = SqliteSaver = Command = None
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("RESUME_STUDIO_AI_PORT", "8765"))
 DEFAULT_OPENAI_MODEL = "openai:gpt-4o-mini"
+DEFAULT_ANTHROPIC_MODEL = "anthropic:claude-3-5-haiku-latest"
 DEFAULT_OLLAMA_MODEL = "ollama:llama3.2"
+SUPPORTED_MODELS = {
+    "openai": DEFAULT_OPENAI_MODEL,
+    "anthropic": DEFAULT_ANTHROPIC_MODEL,
+    "ollama": DEFAULT_OLLAMA_MODEL,
+    "stub": "stub",
+}
 
 
-def choose_model() -> str:
+def choose_provider() -> str:
+    configured = os.environ.get("RESUME_STUDIO_AI_PROVIDER", "").strip().lower()
+    if configured == "openai" and os.environ.get("OPENAI_API_KEY"):
+        return "openai"
+    if configured == "anthropic" and os.environ.get("ANTHROPIC_API_KEY"):
+        return "anthropic"
+    if configured == "ollama":
+        return "ollama"
+    if configured == "stub":
+        return "stub"
+    if os.environ.get("OPENAI_API_KEY"):
+        return "openai"
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "anthropic"
+    if os.environ.get("OLLAMA_BASE_URL") or os.environ.get("OLLAMA_MODEL"):
+        return "ollama"
+    return "stub"
+
+
+def choose_model(provider: str | None = None) -> str:
     configured = os.environ.get("RESUME_STUDIO_AI_MODEL")
     if configured:
         return configured
-    if os.environ.get("OPENAI_API_KEY"):
-        return DEFAULT_OPENAI_MODEL
-    if os.environ.get("OLLAMA_BASE_URL") or os.environ.get("OLLAMA_MODEL"):
-        return DEFAULT_OLLAMA_MODEL
-    return "stub"
+    resolved_provider = provider or choose_provider()
+    return SUPPORTED_MODELS.get(resolved_provider, "stub")
 
 
 def provider_from_model(model: str) -> str:
@@ -296,6 +324,8 @@ class StubRuntime:
 
 class DeepAgentRuntime:
     def __init__(self, model: str, data_dir: Path) -> None:
+        if create_deep_agent is None or SqliteSaver is None:
+            raise RuntimeError("DeepAgents dependencies are not installed.")
         self.model = model
         self.data_dir = data_dir
         self.memory_dir = data_dir / "memories"
@@ -385,8 +415,12 @@ class DeepAgentRuntime:
 
 class AiService:
     def __init__(self) -> None:
-        self.model = choose_model()
-        self.provider = provider_from_model(self.model)
+        self.provider = choose_provider()
+        self.model = choose_model(self.provider)
+        if self.provider == "stub":
+            self.model = "stub"
+        else:
+            self.provider = provider_from_model(self.model)
         self.data_dir = Path(os.environ.get("RESUME_STUDIO_AI_DATA_DIR", ".resume-studio-ai")).expanduser()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.stub = StubRuntime(self.data_dir)
