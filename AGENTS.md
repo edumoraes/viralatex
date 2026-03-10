@@ -18,6 +18,7 @@ The desktop architecture is split into four layers:
 - `desktop/src/`: React UI and local orchestration
 - `desktop/src-tauri/src/lib.rs`: Tauri command boundary exposed to the frontend
 - `desktop/src-tauri/src/`: Rust workspace, renderer, and AI sidecar orchestration
+- `desktop/ai_service/`: Python AI sidecar with DeepAgents runtime, thread persistence, and workspace-scoped file tools
 - `examples/sample-workspace/`: manifest-based local workspace contract used by the app
 
 Build orchestration lives in `Makefile`. Runtime isolation for LaTeX lives in `Dockerfile`. Desktop validation and repository validation live in `bin/test`, `bin/pre-push-check`, the Rust test suite, Python sidecar tests, and the desktop Vitest suite.
@@ -35,8 +36,12 @@ Declared stack, versions, and usage:
 - Tauri 2: desktop shell and command bridge in `desktop/src-tauri/`.
 - Rust: backend language for the desktop app.
 - React 19 + TypeScript + Vite: frontend stack in `desktop/src/`.
+- `@langchain/langgraph-sdk`: frontend streaming client for the agent thread runtime.
 - Vitest + Testing Library + jsdom: desktop frontend regression testing.
-- Python 3 stdlib `unittest`: AI sidecar regression testing.
+- Python 3.12 + `uv`: AI sidecar dependency management and runtime environment.
+- `deepagents`: local agent runtime used by the Python sidecar.
+- LangGraph + `langgraph-checkpoint-sqlite`: thread streaming protocol and checkpoint persistence for the sidecar.
+- Python stdlib `unittest`: AI sidecar regression testing.
 - `tectonic`: local PDF renderer used by the desktop app.
 
 LaTeX libraries loaded in `src/template/resume.cls`:
@@ -72,6 +77,7 @@ These versions come from the built image, not from fully pinned package declarat
 - `RUN_DOCKER_SMOKE_TEST=1 make test`: runs an actual containerized compile after `make image`.
 - `make clean`: removes `out/`.
 - `npm --prefix desktop install`: installs desktop dependencies.
+- `uv sync --directory desktop/ai_service`: creates or updates the managed AI sidecar virtualenv in `desktop/ai_service/.venv`.
 - `npm --prefix desktop run test`: runs desktop Vitest regression tests.
 - `npm --prefix desktop run tauri:dev`: starts the desktop app. This now fails early if `tectonic` is unavailable.
 - `npm --prefix desktop run tauri:build`: builds the desktop app. This also fails early if `tectonic` is unavailable.
@@ -93,6 +99,15 @@ Desktop `tectonic` setup details:
 - In mode 3 on Linux x64, the installer first checks `PATH` for `tectonic` and, if absent, downloads it through the official installer flow.
 - The managed binary directory is intentionally kept in git with `.gitkeep`, while actual binaries remain ignored.
 - If `tectonic` is missing, desktop render attempts fail with an actionable error and `tauri:dev` or `tauri:build` should fail before launching or packaging.
+
+Desktop AI sidecar details:
+
+- The desktop app starts `desktop/ai_service/server.py` through Tauri and probes `GET /health` before enabling chat usage.
+- The Rust launcher prefers `desktop/ai_service/.venv/bin/python` and falls back to `python3` or `python` from `PATH`.
+- The sidecar stores app-local runtime state outside the workspace, including provider-backed checkpoints in `threads.sqlite` and long-term memory in `memories/AGENTS.md`.
+- When no provider-backed model is configured, the sidecar falls back to a stub runtime that preserves the same thread and interrupt contract for development.
+- The React chat uses LangGraph thread streaming, rehydrates prior thread state from `/threads/<id>/state`, and persists the current thread id in `localStorage`.
+- Agent-proposed workspace writes must go through interrupt-based approval in the UI before mutating files under `/profile`, `/blocks`, or `/resumes`.
 
 ## Coding Style & Naming Conventions
 Keep content modular. Prefer editing `src/shared/sections/<lang>/` and `src/shared/profile.tex` before creating variant-specific duplication. New entrypoints belong in `src/versions/pt/` or `src/versions/en/` and should use lowercase descriptive names such as `backend.tex`.
@@ -132,6 +147,7 @@ Desktop testing conventions:
 - Follow TDD for desktop and renderer changes too, not only for the LaTeX layer.
 - For frontend regressions, prefer Vitest with Testing Library and focused mocked boundaries over broad end-to-end scaffolding.
 - For AI sidecar behavior, prefer Python stdlib `unittest` with real local HTTP interaction against the sidecar process.
+- For agent-thread changes, cover thread rehydration, interrupt handling, and mutation approval or rejection flows.
 - For renderer/toolchain resolution, prefer Rust unit tests that isolate path resolution and failure reporting.
 - Do not introduce changes to the renderer, sidecar, or Tauri command flow without automated regression coverage first, unless the user explicitly asks otherwise.
 
