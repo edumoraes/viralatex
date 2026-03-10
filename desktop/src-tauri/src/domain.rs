@@ -15,6 +15,17 @@ pub struct WorkspaceManifest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TemplateManifest {
+    pub id: String,
+    pub name: String,
+    pub engine: String,
+    pub entrypoint: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Profile {
     pub name: String,
     pub roles: Roles,
@@ -64,6 +75,7 @@ pub struct WorkspaceSummary {
     pub workspace_name: String,
     pub profile_name: String,
     pub available_languages: Vec<String>,
+    pub template_count: usize,
     pub block_count: usize,
     pub resume_count: usize,
     pub render_history_count: usize,
@@ -93,6 +105,7 @@ pub struct AppWorkspaceState {
 pub struct WorkspaceSnapshot {
     pub summary: WorkspaceSummary,
     pub manifest: WorkspaceManifest,
+    pub templates: Vec<TemplateManifest>,
     pub profile: Profile,
     pub blocks: Vec<Block>,
     pub resumes: Vec<ResumeDefinition>,

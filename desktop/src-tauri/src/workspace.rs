@@ -1,6 +1,7 @@
 use crate::domain::{
-    AppWorkspaceState, Block, Profile, RenderResult, ResumeDefinition, WorkspaceManifest,
-    WorkspaceSnapshot, WorkspaceSummary, APP_DIR, ARCHIVED_DIR, WORKSPACE_SCHEMA_VERSION,
+    AppWorkspaceState, Block, Profile, RenderResult, ResumeDefinition, TemplateManifest,
+    WorkspaceManifest, WorkspaceSnapshot, WorkspaceSummary, APP_DIR, ARCHIVED_DIR,
+    WORKSPACE_SCHEMA_VERSION,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
-const REQUIRED_DIRECTORIES: &[&str] = &["profile", "blocks", "resumes", "renders"];
+const REQUIRED_DIRECTORIES: &[&str] = &["profile", "blocks", "resumes", "renders", "templates"];
 
 pub fn sample_workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -51,6 +52,8 @@ pub fn validate_workspace(root: &Path) -> Result<WorkspaceManifest, String> {
         return Err(format!("Missing profile file: {}", profile_path.display()));
     }
 
+    load_templates(root)?;
+
     Ok(manifest)
 }
 
@@ -83,6 +86,62 @@ pub fn load_manifest(root: &Path) -> Result<WorkspaceManifest, String> {
 pub fn load_profile(root: &Path) -> Result<Profile, String> {
     let path = root.join("profile/profile.yml");
     read_yaml_file(&path)
+}
+
+pub fn load_templates(root: &Path) -> Result<Vec<TemplateManifest>, String> {
+    let templates_root = root.join("templates");
+    let mut templates = Vec::new();
+
+    for entry in fs::read_dir(&templates_root).map_err(|error| {
+        format!(
+            "Failed to inspect templates directory {}: {error}",
+            templates_root.display()
+        )
+    })? {
+        let entry =
+            entry.map_err(|error| format!("Failed to read template directory entry: {error}"))?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let manifest_path = path.join("template.yml");
+        if !manifest_path.is_file() {
+            return Err(format!(
+                "Missing template manifest: {}",
+                manifest_path.display()
+            ));
+        }
+
+        let manifest: TemplateManifest = read_yaml_file(&manifest_path)?;
+        if manifest.id != entry.file_name().to_string_lossy() {
+            return Err(format!(
+                "Template id {} does not match directory name {}.",
+                manifest.id,
+                path.display()
+            ));
+        }
+        if manifest.entrypoint.trim().is_empty() {
+            return Err(format!(
+                "Template {} must define a non-empty entrypoint.",
+                manifest.id
+            ));
+        }
+
+        let entrypoint_path = path.join(&manifest.entrypoint);
+        if !entrypoint_path.is_file() {
+            return Err(format!(
+                "Template {} entrypoint does not exist: {}",
+                manifest.id,
+                entrypoint_path.display()
+            ));
+        }
+
+        templates.push(manifest);
+    }
+
+    templates.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok(templates)
 }
 
 pub fn save_profile(root: &Path, profile: &Profile) -> Result<Profile, String> {
@@ -203,6 +262,7 @@ pub fn append_render_history(root: &Path, result: &RenderResult) -> Result<(), S
 
 pub fn summarize_workspace(root: &Path) -> Result<WorkspaceSummary, String> {
     let manifest = validate_workspace(root)?;
+    let templates = load_templates(root)?;
     let profile = load_profile(root)?;
     let blocks = load_blocks(root)?;
     let resumes = load_resumes(root)?;
@@ -218,6 +278,7 @@ pub fn summarize_workspace(root: &Path) -> Result<WorkspaceSummary, String> {
         workspace_name: manifest.workspace_name,
         profile_name: profile.name,
         available_languages: languages,
+        template_count: templates.len(),
         block_count: blocks.len(),
         resume_count: resumes.len(),
         render_history_count: render_history.len(),
@@ -229,6 +290,7 @@ pub fn load_workspace_snapshot(root: &Path) -> Result<WorkspaceSnapshot, String>
     Ok(WorkspaceSnapshot {
         summary,
         manifest: load_manifest(root)?,
+        templates: load_templates(root)?,
         profile: load_profile(root)?,
         blocks: load_blocks(root)?,
         resumes: load_resumes(root)?,
@@ -505,6 +567,78 @@ mod tests {
     use crate::domain::{Roles, WORKSPACE_SCHEMA_VERSION};
     use tempfile::tempdir;
 
+    fn sample_profile() -> Profile {
+        Profile {
+            name: "Edu".to_string(),
+            roles: Roles {
+                pt: "Dev".to_string(),
+                en: "Dev".to_string(),
+            },
+            email: "edu@example.com".to_string(),
+            location: "Manaus".to_string(),
+            linkedin: "linkedin.com/in/edu".to_string(),
+            github: "github.com/edu".to_string(),
+        }
+    }
+
+    fn sample_block(block_id: &str) -> Block {
+        Block {
+            id: block_id.to_string(),
+            block_type: "summary".to_string(),
+            language: "en".to_string(),
+            section: "summary".to_string(),
+            title: None,
+            subtitle: None,
+            date_range: None,
+            content: Some("Hello".to_string()),
+            items: Vec::new(),
+            label: None,
+            value: None,
+        }
+    }
+
+    fn sample_resume(resume_id: &str, block_ids: Vec<&str>) -> ResumeDefinition {
+        ResumeDefinition {
+            id: resume_id.to_string(),
+            title: "Resume".to_string(),
+            language: "en".to_string(),
+            role_key: "en".to_string(),
+            block_ids: block_ids.into_iter().map(str::to_string).collect(),
+        }
+    }
+
+    fn seed_workspace(root: &Path, workspace_name: &str) {
+        write_yaml_file(
+            &root.join("workspace.yml"),
+            &make_default_manifest(workspace_name),
+        )
+        .expect("manifest should be written");
+        save_profile(root, &sample_profile()).expect("profile should be saved");
+        ensure_app_dirs(root).expect("app dirs should be created");
+        seed_template(root);
+    }
+
+    fn seed_template(root: &Path) {
+        let default_template_root = root.join("templates/default");
+        fs::create_dir_all(&default_template_root).expect("template root should be created");
+        write_yaml_file(
+            &default_template_root.join("template.yml"),
+            &TemplateManifest {
+                id: "default".to_string(),
+                name: "Default".to_string(),
+                engine: "tectonic".to_string(),
+                entrypoint: "resume.tex".to_string(),
+                description: Some("Bundled default template".to_string()),
+            },
+        )
+        .expect("template manifest should be written");
+        fs::write(
+            default_template_root.join("resume.tex"),
+            "\\documentclass{article}\\begin{document}Hello\\end{document}\n",
+        )
+        .expect("template entrypoint should be written");
+    }
+
     #[test]
     fn validates_manifest_based_workspace() {
         let temp = tempdir().expect("tempdir should exist");
@@ -520,24 +654,9 @@ mod tests {
             },
         )
         .expect("manifest should be written");
-
-        save_profile(
-            root,
-            &Profile {
-                name: "Edu".to_string(),
-                roles: Roles {
-                    pt: "Dev".to_string(),
-                    en: "Dev".to_string(),
-                },
-                email: "edu@example.com".to_string(),
-                location: "Manaus".to_string(),
-                linkedin: "linkedin.com/in/edu".to_string(),
-                github: "github.com/edu".to_string(),
-            },
-        )
-        .expect("profile should be saved");
-
+        save_profile(root, &sample_profile()).expect("profile should be saved");
         ensure_app_dirs(root).expect("app dirs should be created");
+        seed_template(root);
 
         let manifest = validate_workspace(root).expect("workspace should validate");
         assert_eq!(manifest.schema_version, WORKSPACE_SCHEMA_VERSION);
@@ -548,45 +667,8 @@ mod tests {
         let temp = tempdir().expect("tempdir should exist");
         let root = temp.path();
 
-        write_yaml_file(
-            &root.join("workspace.yml"),
-            &make_default_manifest("Archive Test"),
-        )
-        .expect("manifest should be written");
-        save_profile(
-            root,
-            &Profile {
-                name: "Edu".to_string(),
-                roles: Roles {
-                    pt: "Dev".to_string(),
-                    en: "Dev".to_string(),
-                },
-                email: "edu@example.com".to_string(),
-                location: "Manaus".to_string(),
-                linkedin: "linkedin.com/in/edu".to_string(),
-                github: "github.com/edu".to_string(),
-            },
-        )
-        .expect("profile should be saved");
-        ensure_app_dirs(root).expect("app dirs should be created");
-
-        create_block(
-            root,
-            &Block {
-                id: "summary-en".to_string(),
-                block_type: "summary".to_string(),
-                language: "en".to_string(),
-                section: "summary".to_string(),
-                title: None,
-                subtitle: None,
-                date_range: None,
-                content: Some("Hello".to_string()),
-                items: Vec::new(),
-                label: None,
-                value: None,
-            },
-        )
-        .expect("block should be created");
+        seed_workspace(root, "Archive Test");
+        create_block(root, &sample_block("summary-en")).expect("block should be created");
 
         archive_block(root, "summary-en").expect("block should archive");
         assert!(load_blocks(root).expect("blocks should load").is_empty());
@@ -598,59 +680,126 @@ mod tests {
         let temp = tempdir().expect("tempdir should exist");
         let root = temp.path();
 
-        write_yaml_file(
-            &root.join("workspace.yml"),
-            &make_default_manifest("Reference Test"),
-        )
-        .expect("manifest should be written");
-        save_profile(
-            root,
-            &Profile {
-                name: "Edu".to_string(),
-                roles: Roles {
-                    pt: "Dev".to_string(),
-                    en: "Dev".to_string(),
-                },
-                email: "edu@example.com".to_string(),
-                location: "Manaus".to_string(),
-                linkedin: "linkedin.com/in/edu".to_string(),
-                github: "github.com/edu".to_string(),
-            },
-        )
-        .expect("profile should be saved");
-        ensure_app_dirs(root).expect("app dirs should be created");
-
-        create_block(
-            root,
-            &Block {
-                id: "summary-en".to_string(),
-                block_type: "summary".to_string(),
-                language: "en".to_string(),
-                section: "summary".to_string(),
-                title: None,
-                subtitle: None,
-                date_range: None,
-                content: Some("Hello".to_string()),
-                items: Vec::new(),
-                label: None,
-                value: None,
-            },
-        )
-        .expect("block should be created");
-
-        create_resume(
-            root,
-            &ResumeDefinition {
-                id: "resume-en".to_string(),
-                title: "Resume".to_string(),
-                language: "en".to_string(),
-                role_key: "en".to_string(),
-                block_ids: vec!["summary-en".to_string()],
-            },
-        )
-        .expect("resume should be created");
+        seed_workspace(root, "Reference Test");
+        create_block(root, &sample_block("summary-en")).expect("block should be created");
+        create_resume(root, &sample_resume("resume-en", vec!["summary-en"]))
+            .expect("resume should be created");
 
         let error = archive_block(root, "summary-en").expect_err("archive should fail");
         assert!(error.contains("referenced by resumes"));
+    }
+
+    #[test]
+    fn workspace_requires_templates_directory() {
+        let temp = tempdir().expect("tempdir should exist");
+        let root = temp.path();
+
+        write_yaml_file(
+            &root.join("workspace.yml"),
+            &make_default_manifest("Missing Templates"),
+        )
+        .expect("manifest should be written");
+        save_profile(root, &sample_profile()).expect("profile should be saved");
+        ensure_app_dirs(root).expect("app dirs should be created");
+
+        let error = validate_workspace(root).expect_err("workspace should fail validation");
+        assert!(error.contains("Missing workspace directory"));
+        assert!(error.contains("templates"));
+    }
+
+    #[test]
+    fn loads_templates_from_workspace() {
+        let temp = tempdir().expect("tempdir should exist");
+        let root = temp.path();
+
+        seed_workspace(root, "Templates");
+
+        let templates = load_templates(root).expect("templates should load");
+        assert_eq!(templates.len(), 1);
+        assert_eq!(templates[0].id, "default");
+        assert_eq!(templates[0].entrypoint, "resume.tex");
+    }
+
+    #[test]
+    fn create_resume_rejects_unknown_block_ids() {
+        let temp = tempdir().expect("tempdir should exist");
+        let root = temp.path();
+
+        seed_workspace(root, "Unknown Blocks");
+
+        let error = create_resume(root, &sample_resume("resume-en", vec!["missing-block"]))
+            .expect_err("resume should fail");
+
+        assert!(error.contains("unknown block ids"));
+        assert!(error.contains("missing-block"));
+    }
+
+    #[test]
+    fn archive_resume_moves_resume_out_of_active_list() {
+        let temp = tempdir().expect("tempdir should exist");
+        let root = temp.path();
+
+        seed_workspace(root, "Archive Resume");
+        create_resume(root, &sample_resume("resume-en", Vec::new())).expect("resume should exist");
+
+        archive_resume(root, "resume-en").expect("resume should archive");
+
+        assert!(load_resumes(root).expect("resumes should load").is_empty());
+        assert!(archived_resume_path(root, "resume-en").is_file());
+    }
+
+    #[test]
+    fn app_state_roundtrips() {
+        let temp = tempdir().expect("tempdir should exist");
+        let root = temp.path();
+
+        seed_workspace(root, "App State");
+        let app_state = AppWorkspaceState {
+            last_selected_resume_id: Some("resume-en".to_string()),
+        };
+
+        save_app_state(root, &app_state).expect("app state should save");
+        let loaded = load_app_state(root).expect("app state should load");
+
+        assert_eq!(loaded.last_selected_resume_id.as_deref(), Some("resume-en"));
+    }
+
+    #[test]
+    fn append_render_history_sorts_newest_first() {
+        let temp = tempdir().expect("tempdir should exist");
+        let root = temp.path();
+
+        seed_workspace(root, "Render History");
+        append_render_history(
+            root,
+            &RenderResult {
+                job_id: "job-1".to_string(),
+                resume_id: "resume-en".to_string(),
+                status: "completed".to_string(),
+                output_path: Some("/tmp/one.pdf".to_string()),
+                log_path: Some("/tmp/one.log".to_string()),
+                error_message: None,
+                created_at: "2026-03-10T09:00:00Z".to_string(),
+            },
+        )
+        .expect("first render should append");
+        append_render_history(
+            root,
+            &RenderResult {
+                job_id: "job-2".to_string(),
+                resume_id: "resume-en".to_string(),
+                status: "completed".to_string(),
+                output_path: Some("/tmp/two.pdf".to_string()),
+                log_path: Some("/tmp/two.log".to_string()),
+                error_message: None,
+                created_at: "2026-03-10T10:00:00Z".to_string(),
+            },
+        )
+        .expect("second render should append");
+
+        let history = load_render_history(root).expect("render history should load");
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].job_id, "job-2");
+        assert_eq!(history[1].job_id, "job-1");
     }
 }

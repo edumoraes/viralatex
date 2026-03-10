@@ -1,3 +1,5 @@
 id: default
 name: Default bundled template
 engine: tectonic
+entrypoint: resume.tex
+description: Minimal workspace-owned LaTeX template for agent-driven edits and compilation.

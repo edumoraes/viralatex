@@ -7,6 +7,7 @@ type WorkspaceSummary = {
   workspaceName: string;
   profileName: string;
   availableLanguages: string[];
+  templateCount: number;
   blockCount: number;
   resumeCount: number;
   renderHistoryCount: number;
@@ -70,6 +71,13 @@ type AppWorkspaceState = {
 type WorkspaceSnapshot = {
   summary: WorkspaceSummary;
   manifest: WorkspaceManifest;
+  templates: Array<{
+    id: string;
+    name: string;
+    engine: string;
+    entrypoint: string;
+    description?: string | null;
+  }>;
   profile: Profile;
   blocks: Block[];
   resumes: ResumeDefinition[];
@@ -364,7 +372,7 @@ function ChatSurface({
       <div className="section-header">
         <div>
           <p className="eyebrow">AI Chat</p>
-          <h2>Prompt-first workspace assistant</h2>
+          <h2>Template-aware workspace assistant</h2>
         </div>
         <div className="chat-meta">
           <span className="chip chip-active">{aiService.provider}</span>
@@ -416,7 +424,7 @@ function ChatSurface({
       <div className="chat-thread">
         {messages.length === 0 ? (
           <div className="placeholder empty-thread">
-            <p>Ask for resume tailoring, rendering guidance, or workspace inspection.</p>
+            <p>Ask for template selection, resume tailoring, or LaTeX compilation.</p>
             <p>The current workspace summary is sent with each prompt.</p>
           </div>
         ) : (
@@ -638,7 +646,7 @@ export default function App() {
           <h1>Chat-first local resume workstation</h1>
           <p className="lede">
             Workspace operations stay local in Tauri and LaTeX rendering stays in Rust. The only editable
-            surface in the UI is the AI chat.
+            surface in the UI is the AI chat, now grounded in workspace-owned LaTeX templates.
           </p>
         </div>
         <div className="hero-card">
@@ -685,6 +693,10 @@ export default function App() {
               <div>
                 <dt>Blocks</dt>
                 <dd>{snapshot.summary.blockCount}</dd>
+              </div>
+              <div>
+                <dt>Templates</dt>
+                <dd>{snapshot.summary.templateCount}</dd>
               </div>
               <div>
                 <dt>Renders</dt>

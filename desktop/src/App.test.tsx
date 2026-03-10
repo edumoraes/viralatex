@@ -65,7 +65,7 @@ vi.mock("@langchain/langgraph-sdk/react", async () => {
               {
                 id: `assistant-${current.length}`,
                 type: "ai",
-                content: "Approved. I updated the summary-en block in the workspace."
+                content: "Approved. I updated the requested workspace file."
               }
             ]);
             return;
@@ -183,7 +183,7 @@ describe("App chat flow", () => {
     await userEvent.type(screen.getByLabelText("Chat prompt"), "stream this");
     await userEvent.click(screen.getByRole("button", { name: "Send prompt" }));
 
-    const chatPanel = screen.getByRole("heading", { name: "Prompt-first workspace assistant" }).closest("article");
+    const chatPanel = screen.getByRole("heading", { name: "Template-aware workspace assistant" }).closest("article");
     expect(chatPanel).not.toBeNull();
 
     await screen.findByText("State: streaming");
