@@ -128,6 +128,7 @@ class AiSidecarServerTest(unittest.TestCase):
 
     def test_stream_returns_assistant_message_for_stub_model(self):
         port, _ = self.start_server()
+        thread_id = "thread-stub"
 
         events = self.post_stream(
             port,
@@ -143,14 +144,23 @@ class AiSidecarServerTest(unittest.TestCase):
                 "context": {
                     "workspaceRoot": str(self.workspace_root),
                 },
-                "config": {"configurable": {"thread_id": "thread-stub"}},
+                "config": {"configurable": {"thread_id": thread_id}},
             },
         )
 
         event_names = [event["event"] for event in events]
+        self.assertIn("messages", event_names)
         self.assertIn("values", event_names)
+        self.assertLess(event_names.index("messages"), event_names.index("values"))
 
-        state = self.get_thread_state(port, "thread-stub")
+        message_events = [event["data"] for event in events if event["event"] == "messages"]
+        self.assertGreater(len(message_events), 1)
+
+        assistant_chunks = [event for event in message_events if event[0]["type"] == "AIMessageChunk"]
+        self.assertGreater(len(assistant_chunks), 1)
+        self.assertEqual(len({event[0]["id"] for event in assistant_chunks}), 1)
+
+        state = self.get_thread_state(port, thread_id)
         messages = state["values"]["messages"]
         self.assertEqual(messages[0]["type"], "human")
         self.assertEqual(messages[-1]["type"], "ai")

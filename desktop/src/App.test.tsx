@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -46,6 +46,7 @@ vi.mock("@langchain/langgraph-sdk/react", async () => {
       const [messages, setMessages] = React.useState<Array<{ id: string; type: string; content: string }>>([]);
       const [isLoading, setIsLoading] = React.useState(false);
       const [interrupts, setInterrupts] = React.useState<Array<unknown>>([]);
+      const streamingIdRef = React.useRef<string | null>(null);
 
       return {
         messages,
@@ -77,15 +78,23 @@ vi.mock("@langchain/langgraph-sdk/react", async () => {
           }
 
           await new Promise((resolve) => setTimeout(resolve, 25));
-
+          const streamingId = `assistant-streaming-${crypto.randomUUID()}`;
+          streamingIdRef.current = streamingId;
           setMessages((current) => [
             ...current,
             {
-              id: `assistant-${current.length}`,
+              id: streamingId,
               type: "ai",
-              content: "Stub DeepAgents runtime active."
+              content: "Stub DeepAgents"
             }
           ]);
+
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === streamingIdRef.current ? { ...message, content: "Stub DeepAgents runtime active." } : message
+            )
+          );
           setIsLoading(false);
         },
         toolCalls: [],
@@ -147,6 +156,7 @@ describe("App chat flow", () => {
 
     await screen.findByText("State: streaming");
     expect(screen.getByRole("button", { name: "Send prompt" })).toBeDisabled();
+    await screen.findByText("Stub DeepAgents");
 
     await waitFor(() => {
       expect(screen.getByText("State: ready")).toBeInTheDocument();
@@ -161,6 +171,30 @@ describe("App chat flow", () => {
 
     await waitFor(() => {
       expect(screen.getAllByText("State: ready")[0]).toBeInTheDocument();
+    });
+  });
+
+  it("shows the partial assistant response before streaming finishes", async () => {
+    const { default: App } = await import("./App");
+    render(<App />);
+
+    expect(await screen.findByText("State: ready")).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText("Chat prompt"), "stream this");
+    await userEvent.click(screen.getByRole("button", { name: "Send prompt" }));
+
+    const chatPanel = screen.getByRole("heading", { name: "Prompt-first workspace assistant" }).closest("article");
+    expect(chatPanel).not.toBeNull();
+
+    await screen.findByText("State: streaming");
+    await waitFor(() => {
+      expect(within(chatPanel as HTMLElement).getByText("Stub DeepAgents")).toBeInTheDocument();
+    });
+
+    expect(within(chatPanel as HTMLElement).queryByText("Stub DeepAgents runtime active.")).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(within(chatPanel as HTMLElement).getByText("Stub DeepAgents runtime active.")).toBeInTheDocument();
     });
   });
 

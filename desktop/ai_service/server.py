@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
+from collections.abc import Iterator
 from dataclasses import asdict, is_dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -114,6 +116,12 @@ def append_interrupts(values: dict[str, Any], interrupts: list[dict[str, Any]]) 
     return next_values
 
 
+def chunk_text(value: str, size: int = 18) -> list[str]:
+    if not value:
+        return [""]
+    return [value[index : index + size] for index in range(0, len(value), size)]
+
+
 def serialize(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -199,9 +207,10 @@ class StubRuntime:
         input_value: dict[str, Any] | None,
         command: dict[str, Any] | None,
         context: dict[str, Any],
-    ) -> list[tuple[str, dict[str, Any]]]:
+    ) -> Iterator[tuple[str, Any]]:
         if command:
-            return self.resume(thread_id, command, context)
+            yield from self.resume(thread_id, command, context)
+            return
         if not input_value:
             raise ValueError("Missing input for stream request.")
 
@@ -215,8 +224,6 @@ class StubRuntime:
             prompt = str(incoming[-1].get("content", ""))
 
         workspace_root = Path(context.get("workspaceRoot") or "")
-        events: list[tuple[str, dict[str, Any]]] = []
-
         if "summary-en" in prompt and "LangGraph" in prompt and "DeepAgents" in prompt:
             summary_path = workspace_root / "blocks" / "summaries" / "summary-en.yml"
             interrupt = {
@@ -249,31 +256,46 @@ class StubRuntime:
                 },
             }
             self.save_state(thread_id, state)
-            events.append(("values", append_interrupts(state["values"], state["interrupts"])))
-            return events
+            yield ("values", append_interrupts(state["values"], state["interrupts"]))
+            return
 
         workspace_name = workspace_root.name or "workspace"
+        assistant_id = str(uuid.uuid4())
+        assistant_content = (
+            "Stub DeepAgents runtime active. "
+            f"I can inspect the current workspace ({workspace_name}) and persist thread state locally."
+        )
+        for piece in chunk_text(assistant_content):
+            yield (
+                "messages",
+                [
+                    {
+                        "id": assistant_id,
+                        "type": "AIMessageChunk",
+                        "content": piece,
+                    },
+                    {},
+                ],
+            )
+            time.sleep(0.01)
+
         messages.append(
             {
-                "id": str(uuid.uuid4()),
+                "id": assistant_id,
                 "type": "ai",
-                "content": (
-                    "Stub DeepAgents runtime active. "
-                    f"I can inspect the current workspace ({workspace_name}) and persist thread state locally."
-                ),
+                "content": assistant_content,
             }
         )
         state = {"status": "idle", "values": {"messages": messages}, "interrupts": [], "pending": None}
         self.save_state(thread_id, state)
-        events.append(("values", state["values"]))
-        return events
+        yield ("values", state["values"])
 
     def resume(
         self,
         thread_id: str,
         command: dict[str, Any],
         context: dict[str, Any],
-    ) -> list[tuple[str, dict[str, Any]]]:
+    ) -> Iterator[tuple[str, Any]]:
         state = self.load_state(thread_id)
         decisions = serialize(command.get("resume", {}).get("decisions", []))
         if not decisions:
@@ -296,7 +318,8 @@ class StubRuntime:
                 }
             )
             self.save_state(thread_id, state)
-            return [("values", state["values"])]
+            yield ("values", state["values"])
+            return
 
         proposed_content = pending["content"]
         if decision.get("type") == "edit":
@@ -319,7 +342,7 @@ class StubRuntime:
             }
         )
         self.save_state(thread_id, state)
-        return [("values", state["values"])]
+        yield ("values", state["values"])
 
 
 class DeepAgentRuntime:
@@ -390,7 +413,7 @@ class DeepAgentRuntime:
         input_value: dict[str, Any] | None,
         command: dict[str, Any] | None,
         context: dict[str, Any],
-    ) -> list[tuple[str, dict[str, Any]]]:
+    ) -> Iterator[tuple[str, Any]]:
         config = {"configurable": {"thread_id": thread_id}}
         payload: dict[str, Any] | Command | None = input_value
         if command is not None:
@@ -399,18 +422,28 @@ class DeepAgentRuntime:
         if payload is None:
             raise ValueError("Missing input for stream request.")
 
-        events: list[tuple[str, dict[str, Any]]] = []
-        for chunk in self.agent.stream(
-            payload,
-            config=config,
-            context=context,
-            stream_mode="values",
-        ):
-            events.append(("values", serialize(chunk)))
+        if command is not None:
+            for chunk in self.agent.stream(
+                payload,
+                config=config,
+                context=context,
+                stream_mode="values",
+            ):
+                yield ("values", serialize(chunk))
+        else:
+            for chunk in self.agent.stream(
+                payload,
+                config=config,
+                context=context,
+                stream_mode="messages",
+            ):
+                if not isinstance(chunk, tuple) or len(chunk) != 2:
+                    continue
+                message, metadata = chunk
+                yield ("messages", [serialize(message), serialize(metadata)])
 
         state = self.get_state(thread_id)
-        events.append(("values", state["values"]))
-        return events
+        yield ("values", state["values"])
 
 
 class AiService:
@@ -445,10 +478,11 @@ class AiService:
         input_value: dict[str, Any] | None,
         command: dict[str, Any] | None,
         context: dict[str, Any],
-    ) -> list[tuple[str, dict[str, Any]]]:
+    ) -> Iterator[tuple[str, Any]]:
         if self.deep_agent is None:
-            return self.stub.stream(thread_id, input_value, command, context)
-        return self.deep_agent.stream(thread_id, input_value, command, context)
+            yield from self.stub.stream(thread_id, input_value, command, context)
+            return
+        yield from self.deep_agent.stream(thread_id, input_value, command, context)
 
 
 class ResumeStudioHandler(BaseHTTPRequestHandler):

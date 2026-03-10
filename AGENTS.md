@@ -109,8 +109,9 @@ Desktop AI sidecar details:
 - Remote providers require an API key in the chat provider controls. `ollama` and `stub` do not require one.
 - The sidecar stores app-local runtime state outside the workspace, including provider-backed checkpoints in `threads.sqlite` and long-term memory in `memories/AGENTS.md`.
 - The sidecar resolves provider and model from explicit startup environment when available, and falls back to `stub` when no valid provider-backed configuration is present.
-- When no provider-backed model is configured, the sidecar falls back to a stub runtime that preserves the same thread and interrupt contract for development.
-- The React chat uses LangGraph thread streaming, rehydrates prior thread state from `/threads/<id>/state`, and persists the current thread id in `localStorage`.
+- When no provider-backed model is configured, the sidecar falls back to a stub runtime that preserves the same thread, streaming, and interrupt contract for development.
+- The React chat uses LangGraph thread streaming, rehydrates prior thread state from `/threads/<id>/state`, persists the current thread id in `localStorage`, and expects live `/stream` `messages` events for token-by-token assistant output.
+- The `/stream` endpoint still emits `values` snapshots for final state reconciliation and interrupt payloads such as `__interrupt__`.
 - Applying a provider change from the chat UI resets the current thread id so thread state does not mix across providers.
 - Agent-proposed workspace writes must go through interrupt-based approval in the UI before mutating files under `/profile`, `/blocks`, or `/resumes`.
 

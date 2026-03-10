@@ -33,9 +33,11 @@ Runtime behavior:
 
 - the sidecar chooses its model from `RESUME_STUDIO_AI_MODEL`, `OPENAI_API_KEY`, or Ollama-related environment variables
 - provider-backed runs use DeepAgents with filesystem-scoped access to `/profile`, `/blocks`, `/resumes`, and `/memories/AGENTS.md`
+- live assistant responses are streamed through incremental `messages` SSE events so the chat renders token-by-token
+- the `/stream` endpoint still emits `values` snapshots for final reconciliation and interrupt payloads such as `__interrupt__`
 - write operations are interrupt-driven and require explicit approval from the desktop UI before the workspace is mutated
 - thread state is persisted locally and can be reloaded after restarting the sidecar
-- when no provider is configured, the sidecar falls back to a local stub runtime that preserves the same thread and approval shape for development
+- when no provider is configured, the sidecar falls back to a local stub runtime that preserves the same thread, streaming, and approval shape for development
 
 ### Workspace contract
 
@@ -142,7 +144,7 @@ The desktop chat now uses a persistent thread model instead of the previous stat
 
 1. The frontend starts the sidecar through Tauri and receives `baseUrl`, `provider`, and `model`.
 2. The chat panel opens a LangGraph stream against `/stream` and keeps a local `threadId` in `localStorage`.
-3. The sidecar returns `values` events containing serialized messages and optional `__interrupt__` actions.
+3. The sidecar streams assistant output through incremental `messages` events and emits `values` for the final thread snapshot or optional `__interrupt__` actions.
 4. If the agent proposes a workspace edit, the UI shows the target path and proposed content for approval, edit-and-approve, or rejection.
 5. The selected decision is sent back as a resume command so the sidecar can continue or discard the pending mutation.
 6. The current thread state can be rehydrated from `/threads/:id/state` after restarting the app or sidecar.

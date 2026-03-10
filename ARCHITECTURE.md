@@ -103,9 +103,10 @@ Key responsibilities:
 - expose `/health`, `/stream`, and `/threads/:id/state` over a loopback HTTP server
 - select a model from local environment configuration
 - run a `deepagents` agent with a `SqliteSaver` checkpointer when a real provider is configured
+- stream live assistant output as LangGraph-compatible `messages` SSE events and reserve `values` events for reconciliation and interrupts
 - constrain filesystem access to workspace content directories and an app-local `/memories/AGENTS.md`
 - interrupt file edits so the frontend can approve, edit, or reject proposed mutations
-- fall back to a local stub runtime when no provider is configured while preserving the same thread and interrupt contract
+- fall back to a local stub runtime when no provider is configured while preserving the same thread, streaming, and interrupt contract
 
 The agent is intentionally scoped:
 
