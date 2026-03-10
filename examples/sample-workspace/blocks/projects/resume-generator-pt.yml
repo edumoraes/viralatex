@@ -2,7 +2,7 @@ id: resume-generator-pt
 blockType: project
 language: pt
 section: project
-title: Sistema Bilíngue de Geração de Currículos em LaTeX
+title: ViraLaTex
 dateRange: 2026
-content: Projetei e implementei uma base reutilizável em LaTeX com variantes por idioma, seções compartilhadas, pipeline de build em Docker e verificações automatizadas.
+content: Projetei e implementei o ViraLaTex, uma base reutilizável em LaTeX com variantes por idioma, seções compartilhadas, pipeline de build em Docker e verificações automatizadas.
 items: []
