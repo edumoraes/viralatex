@@ -18,6 +18,8 @@ run() {
 [[ -d "desktop/node_modules" ]] || fail "desktop dependencies are missing; run 'npm --prefix desktop install'."
 
 run make test
+run python3 -m unittest discover -s desktop/ai_service/tests -p 'test_*.py'
+run npm --prefix desktop run test
 run npm --prefix desktop run build
 run cargo test --manifest-path desktop/src-tauri/Cargo.toml
 
