@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const invokeMock = vi.fn(async (command: string) => {
+const invokeMock = vi.fn<(command: string) => Promise<unknown>>(async (command: string) => {
   if (command === "ensure_ai_service_started") {
     return {
       baseUrl: "http://127.0.0.1:8765",
