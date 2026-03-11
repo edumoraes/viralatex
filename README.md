@@ -1,47 +1,100 @@
-# Resume Studio Bootstrap
+# ViraLaTex
 
-This repository now contains two complementary layers:
+Local-first desktop software for writing, structuring, and rendering professional documents with AI assistance.
 
-- the original LaTeX engine in `src/`, still useful as a reference and template base
-- the local-first desktop application in `desktop/`, including a Python AI sidecar backed by DeepAgents
+Today, ViraLaTex is focused on resume authoring. The product direction is broader: a local document workstation for resumes, technical documents, and scientific writing, with plain files as the source of truth and an AI assistant that works inside a user-owned workspace.
 
-The immediate goal is to validate the product foundation with `Tauri + Rust + React + TypeScript`, using a manifest-versioned local workspace, form-based local CRUD, workspace-local operational persistence, and real local rendering through `tectonic`.
+## Why This Exists
 
-## Desktop Bootstrap
+Most writing tools force a bad tradeoff:
 
-The desktop app lives in `desktop/` and assumes:
+- polished editing but weak structure
+- strong markup but poor UX
+- AI assistance but zero control over files, prompts, or approval flow
 
-- `filesystem` as the canonical source of user data
-- a stable workspace contract rooted at `workspace.yml`
-- workspace-local operational state in `.app/`
-- `SQLite` only as a future operational and indexing layer
-- `tectonic` as the local PDF rendering engine
-- a local Python AI sidecar for prompt-driven workspace assistance
-- a sample workspace in `examples/sample-workspace/`
+ViraLaTex is trying to remove that tradeoff.
 
-### AI sidecar runtime
+The app keeps document data local, renders locally, stores artifacts as regular files, and uses AI as an assistant instead of a hidden black box. The current workflow is resume-first because that is the narrowest useful problem to solve well before expanding into broader authoring workflows.
 
-The desktop app now starts a local AI sidecar that exposes a LangGraph-compatible stream endpoint for the chat panel.
+## Current Product Scope
 
-- `desktop/ai_service/server.py`: Python HTTP sidecar exposing `/health`, `/stream`, and `/threads/:id/state`
-- `deepagents`: agent runtime used when `RESUME_STUDIO_AI_MODEL` resolves to a provider-backed model
-- `langgraph-checkpoint-sqlite`: thread checkpoint persistence for sidecar conversation state
-- `desktop/src-tauri/src/ai_service.rs`: Tauri launcher that starts the sidecar and assigns an app-local data directory
-- `desktop/src/App.tsx`: React chat client using `@langchain/langgraph-sdk/react`
+What works today:
 
-Runtime behavior:
+- local desktop app built with Tauri, Rust, React, and TypeScript
+- manifest-based workspace stored on disk
+- structured authoring for profile, reusable content blocks, and resume definitions
+- local PDF rendering through `tectonic`
+- local AI sidecar with persistent threads, streamed responses, and approval-based file mutations
+- sample workspace to validate the authoring model end to end
 
-- the sidecar chooses its model from `RESUME_STUDIO_AI_MODEL`, `OPENAI_API_KEY`, or Ollama-related environment variables
-- provider-backed runs use DeepAgents with filesystem-scoped access to `/profile`, `/blocks`, `/resumes`, and `/memories/AGENTS.md`
-- live assistant responses are streamed through incremental `messages` SSE events so the chat renders token-by-token
-- the `/stream` endpoint still emits `values` snapshots for final reconciliation and interrupt payloads such as `__interrupt__`
-- write operations are interrupt-driven and require explicit approval from the desktop UI before the workspace is mutated
-- thread state is persisted locally and can be reloaded after restarting the sidecar
-- when no provider is configured, the sidecar falls back to a local stub runtime that preserves the same thread, streaming, and approval shape for development
+What comes next:
 
-### Workspace contract
+- richer document authoring beyond resumes
+- app-defined templates plus workspace-owned document sources
+- stronger flows for technical and scientific documents
+- more capable AI-assisted drafting, editing, and restructuring
 
-Each workspace now has an explicit root manifest plus entity folders:
+## Product Direction
+
+ViraLaTex is being built as a document workstation, not just a resume generator.
+
+The intended end state is:
+
+- resumes as one document type among many
+- technical writing backed by structured content and reusable fragments
+- scientific and academic writing with local files, reproducible rendering, and agent assistance
+- explicit human approval before workspace mutations
+- no dependency on cloud-hosted document storage
+
+The current repository already reflects that transition: the legacy LaTeX resume system still exists, while the desktop app is the main path forward.
+
+## How It Is Built
+
+This repository has two active layers.
+
+### 1. Legacy LaTeX engine
+
+The original LaTeX system lives in `src/` and remains the canonical reference for the current resume pipeline.
+
+```text
+src/
+  template/
+    resume.cls
+  shared/
+    profile.tex
+    sections/
+      pt/
+      en/
+  versions/
+    pt/
+    en/
+```
+
+Use this layer when you want deterministic Docker-based generation of the existing resume variants.
+
+### 2. Desktop application
+
+The product layer under active development lives in `desktop/`.
+
+```text
+desktop/
+  src/                 React UI
+  src-tauri/           Tauri app and Rust backend
+  ai_service/          Python AI sidecar
+examples/
+  sample-workspace/    Example local workspace
+```
+
+This app is local-first by design:
+
+- user data lives in workspace files
+- rendering happens locally
+- AI runs through a local sidecar
+- thread state and long-term memory are persisted locally
+
+## Workspace Model
+
+Each workspace is a plain-file contract rooted at `workspace.yml`.
 
 ```text
 workspace.yml
@@ -49,131 +102,158 @@ workspace.yml
   state.yml
   render-history.yml
 profile/
+  profile.yml
 blocks/
   _archived/
 resumes/
   _archived/
+documents/
 renders/
 ```
 
-- `workspace.yml`: stable contract entrypoint with `schemaVersion`, `workspaceId`, `workspaceName`, and `defaultTemplateId`
-- `profile/profile.yml`: singleton profile document
-- `blocks/**/*.yml`: active reusable content blocks
-- `resumes/*.yml`: active resume definitions
-- `blocks/_archived` and `resumes/_archived`: soft-deleted entities
-- `.app/render-history.yml`: persisted render history
-- `.app/state.yml`: minimal workspace-local app state such as last selected resume
+Meaning:
 
-### New structure
+- `profile/`: singleton profile data
+- `blocks/`: reusable content units
+- `resumes/`: composed resume definitions
+- `documents/`: workspace-owned LaTeX document sources
+- `renders/`: generated output artifacts
+- `.app/`: local operational state only
 
-```text
-desktop/
-  src/
-  src-tauri/
-examples/
-  sample-workspace/
-src/
-  template/
-  shared/
-  versions/
-```
+The desktop app also ships app-defined LaTeX templates from `desktop/src-tauri/templates/`, which are exposed to the AI as read-only references.
 
-### Bootstrap requirements
+## AI Model
+
+The AI sidecar is not a generic chatbot bolted onto the UI. It is a workspace-aware assistant with explicit boundaries.
+
+Key properties:
+
+- started locally by Tauri
+- streams responses through a LangGraph-compatible API
+- persists thread state in local SQLite
+- can inspect workspace files and app templates
+- must go through approval interrupts before mutating workspace files
+- falls back to a stub runtime when no provider-backed model is configured
+
+Supported providers:
+
+- `openai`
+- `anthropic`
+- `ollama`
+- `stub`
+
+The app stores provider selection and optional API key in app-local state, not in the workspace.
+
+## Quick Start
+
+### Desktop app
+
+Requirements:
 
 - Node.js + npm
 - Rust toolchain
 - Python 3.12+
-- `uv` for sidecar dependency sync
-- managed `tectonic` binary in `desktop/src-tauri/binaries/tectonic`, or a custom path via `TECTONIC_BIN`
+- `uv`
 
-### Bootstrap commands
-
-```bash
-cd desktop
-npm install
-npm run tauri:dev
-```
-
-Set up the AI sidecar environment before using the desktop chat or running sidecar tests:
+Install dependencies:
 
 ```bash
+npm --prefix desktop install
 uv sync --directory desktop/ai_service
 ```
 
-The Tauri backend prefers `desktop/ai_service/.venv/bin/python` and falls back to `python3` or `python` from `PATH` only when the managed virtualenv is absent.
-
-Before rendering resumes, install or register a local `tectonic` binary for the desktop app:
+Install or register `tectonic`:
 
 ```bash
 bin/setup-tectonic
 ```
 
-The installer works in three modes:
+Start the app:
 
-1. `bin/setup-tectonic /path/to/tectonic`
-2. `TECTONIC_BIN=/path/to/tectonic bin/setup-tectonic`
-3. `bin/setup-tectonic`
-   On Linux x64, this will try the local `PATH` first and then download `tectonic` via the official installer if it is still missing.
+```bash
+npm --prefix desktop run tauri:dev
+```
 
-If `tectonic` is already in your `PATH`, you can also run:
+Build the desktop app:
+
+```bash
+npm --prefix desktop run tauri:build
+```
+
+`tectonic` is resolved in this order:
+
+1. `TECTONIC_BIN`
+2. `desktop/src-tauri/binaries/tectonic`
+3. packaged Tauri resources
+4. `tectonic` from `PATH`
+
+You can also install the managed binary with:
 
 ```bash
 make tectonic-setup
 ```
 
-To use a specific `tectonic` binary without copying it into the managed location:
+Or point to a custom binary:
 
 ```bash
-TECTONIC_BIN=/path/to/tectonic npm run tauri:dev
+TECTONIC_BIN=/path/to/tectonic npm --prefix desktop run tauri:dev
 ```
 
-The desktop app resolves `tectonic` in this order:
+### Legacy LaTeX pipeline
 
-1. `TECTONIC_BIN`
-2. `desktop/src-tauri/binaries/tectonic`
-3. bundled app resource path for packaged builds
-4. `tectonic` from `PATH`
+Requirements:
 
-The managed local binary at `desktop/src-tauri/binaries/tectonic` is the preferred path for Linux development and future app packaging.
+- Docker
+- GNU Make
 
-Both `npm --prefix desktop run tauri:dev` and `npm --prefix desktop run tauri:build` now fail early with an actionable message if `tectonic` is unavailable.
-
-### AI chat workflow
-
-The desktop chat now uses a persistent thread model instead of the previous stateless message streaming.
-
-1. The frontend starts the sidecar through Tauri and receives `baseUrl`, `provider`, and `model`.
-2. The chat panel opens a LangGraph stream against `/stream` and keeps a local `threadId` in `localStorage`.
-3. The sidecar streams assistant output through incremental `messages` events and emits `values` for the final thread snapshot or optional `__interrupt__` actions.
-4. If the agent proposes a workspace edit, the UI shows the target path and proposed content for approval, edit-and-approve, or rejection.
-5. The selected decision is sent back as a resume command so the sidecar can continue or discard the pending mutation.
-6. The current thread state can be rehydrated from `/threads/:id/state` after restarting the app or sidecar.
-
-## Local quality workflow
-
-The repository uses `pre-commit` for local hook orchestration and shared quality checks.
-
-Required local tools:
-
-- `pre-commit`
-- Node.js + npm
-- Rust toolchain with `clippy` and `rustfmt`
-- `cargo-audit`
-- Python 3.12+
-- `uv`
-
-Install the local workflow:
+Build the image:
 
 ```bash
-npm --prefix desktop install
-cargo install cargo-audit
-pipx install pre-commit
-uv sync --directory desktop/ai_service
-make tectonic-setup TECTONIC_BIN=/path/to/tectonic
-make hooks-install
+make image
 ```
 
-Run the checks manually:
+Build everything:
+
+```bash
+make build
+make build-all
+```
+
+Build only Portuguese variants:
+
+```bash
+make build-pt
+```
+
+Build only English variants:
+
+```bash
+make build-en
+```
+
+Remove generated artifacts:
+
+```bash
+make clean
+```
+
+Outputs are written to `out/`.
+
+## Development Workflow
+
+The repository follows an XP-style workflow with tests and automation around each layer.
+
+Useful commands:
+
+```bash
+make test
+python3 -m unittest discover -s desktop/ai_service/tests -p 'test_*.py'
+npm --prefix desktop run test
+npm --prefix desktop run build
+cargo test --manifest-path desktop/src-tauri/Cargo.toml
+```
+
+Repository validation is also available through:
 
 ```bash
 make lint
@@ -182,123 +262,14 @@ make check
 make hooks-run
 ```
 
-Hook behavior:
+## What To Expect From The App
 
-- `pre-commit`: file hygiene, YAML/JSON/TOML validation, secret detection, shell checks, frontend lint, Rust formatting, and Rust clippy
-- `pre-push`: `make test`, renderer and sidecar regression tests, `npm --prefix desktop run build`, and `cargo test --manifest-path desktop/src-tauri/Cargo.toml`
+In its current state, ViraLaTex is best understood as:
 
-The app creates or opens a local workspace, edits profile, blocks, and resume definitions through structured forms, persists render history inside the workspace, and renders PDFs into the workspace `renders/` directory.
+- a serious local foundation for AI-assisted resume authoring
+- a transition layer from a handcrafted LaTeX system to a broader authoring product
+- a workspace-centric architecture designed to grow into technical and scientific document workflows
 
-## Legacy LaTeX Engine
+If your interest is only resumes, the repository already supports that.
 
-LaTeX project for maintaining multiple resume variants with a shared base, bilingual support, and Docker-based compilation.
-
-The build configures `TEXINPUTS` automatically so shared classes and sections can be resolved without fragile relative paths. Compilation still uses LuaLaTeX by default to preserve Unicode text and pt-BR glyphs in the final PDF.
-
-## Estrutura
-
-```text
-src/
-  shared/
-    profile.tex
-    sections/
-      pt/
-      en/
-  template/
-    resume.cls
-  versions/
-    pt/
-    en/
-out/
-```
-
-- `src/template/resume.cls`: layout, macros compartilhadas e configuração tipográfica compatível com LuaLaTeX.
-- `src/shared/profile.tex`: identidade, contatos e links reutilizaveis.
-- `src/shared/sections/<idioma>/`: secoes reutilizaveis por idioma.
-- `src/versions/<idioma>/`: pontos de entrada compilaveis para cada variante.
-- `out/`: PDFs e artefatos de build. Os arquivos compilados recebem prefixo do idioma, por exemplo `pt-base.pdf` e `en-base.pdf`.
-
-## Requisitos
-
-- Docker
-- GNU Make
-
-## Uso
-
-Construir a imagem:
-
-```bash
-make image
-```
-
-Gerar todas as versoes:
-
-```bash
-make build
-make build-all
-```
-
-Isso produz artefatos distintos por idioma e variante em `out/`, como `pt-base.pdf`, `en-base.pdf`, `pt-backend.pdf` e `en-backend.pdf`.
-
-Gerar apenas as versoes em portugues:
-
-```bash
-make build-pt
-```
-
-Gerar apenas as versoes em ingles:
-
-```bash
-make build-en
-```
-
-Remover arquivos gerados:
-
-```bash
-make clean
-```
-
-Rodar os testes automatizados:
-
-```bash
-make test
-```
-
-## Adicionando uma nova variante
-
-1. Crie um novo arquivo em `src/versions/pt/` ou `src/versions/en/`.
-2. Use uma das variantes existentes como base.
-3. Misture as secoes compartilhadas com blocos especificos da vaga quando necessario.
-4. Rode `make build-all` ou compile a variante desejada via `make build FILE=src/versions/...`.
-
-## Modelo de manutencao
-
-- Edite `src/shared/profile.tex` para contatos e links.
-- Edite `src/shared/sections/pt/` e `src/shared/sections/en/` para atualizar o conteudo comum.
-- Crie blocos extras por variante quando quiser enfatizar um perfil especifico sem duplicar o layout inteiro.
-
-## Comando de build ad hoc
-
-Para compilar um arquivo especifico:
-
-```bash
-make build FILE=src/versions/pt/base.tex
-```
-
-Sem `FILE`, `make build` compila todas as variantes. Com `FILE`, o PDF tambem e gerado com prefixo do idioma, por exemplo `out/pt-base.pdf`.
-
-## Testes
-
-O runner `bin/test` valida:
-
-- presenca da estrutura obrigatoria do projeto
-- variantes minimas em portugues e ingles
-- uso do template e perfil compartilhados
-- integridade basica dos alvos de build
-
-Para incluir um smoke test de compilacao real via Docker:
-
-```bash
-make image
-RUN_DOCKER_SMOKE_TEST=1 make test
-```
+If your interest is broader authoring, this is the direction the product is being actively shaped toward.
